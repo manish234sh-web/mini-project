@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>JAN SURAKSHA | Smart Surveillance & Safety Portal</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;900&family=Geist:wght@500;700;900&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+                "brand-yellow": "#FFCC00",
+                "brand-red": "#FF3333",
+                "brand-cyan": "#00E5FF",
+                "brand-purple": "#8B5CF6",
+            },
+            fontFamily: {
+                "sans": ["Manrope", "sans-serif"],
+                "mono": ["Geist", "monospace"],
+            },
+            boxShadow: {
+                "brutal": "8px 8px 0px 0px rgba(0,0,0,1)",
+                "brutal-sm": "4px 4px 0px 0px rgba(0,0,0,1)",
+            }
+          },
+        },
+      }
+    </script>
+    <style>
+        body { 
+            background-color: #FFFFFF; 
+            color: #000000; 
+            scroll-behavior: smooth; 
+            background-image: radial-gradient(#000 1px, transparent 1px); 
+            background-size: 24px 24px; 
+            overflow-x: hidden;
+        }
+        input[type="text"], input[type="password"], textarea {
+            background: #FFFFFF; 
+            border: 4px solid #000000; 
+            color: #000000; 
+            font-weight: 900; 
+            border-radius: 0; 
+            transition: all 0.2s;
+        }
+        input[type="text"]:focus, input[type="password"]:focus, textarea:focus {
+            outline: none; 
+            background: #FFCC00; 
+            box-shadow: 4px 4px 0px 0px rgba(0,0,0,1);
+        }
+        .framer-reveal { 
+            opacity: 0; 
+            transform: translateY(30px); 
+            transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1); 
+        }
+        .framer-reveal.visible { 
+            opacity: 1; 
+            transform: translateY(0); 
+        }
+        #map-container { 
+            border: 4px solid #000000; 
+            height: 280px; 
+            width: 100%; 
+            z-index: 10; 
+        }
+    </style>
+</head>
+<body class="antialiased min-h-screen font-sans relative">
+
+    <!-- OFFICIAL LOGIN MODAL (SECURE) -->
+    <div id="admin-modal" class="hidden fixed inset-0 z-[300] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-brand-yellow border-4 border-black p-6 md:p-8 max-w-md w-full shadow-brutal relative">
+            <button onclick="document.getElementById('admin-modal').classList.add('hidden')" class="absolute top-2 right-4 font-black text-4xl hover:text-brand-red transition-colors">&times;</button>
+            <div class="flex items-center gap-2 mb-6 border-b-4 border-black pb-4">
+                <span class="material-symbols-outlined text-4xl">terminal</span>
+                <h2 class="text-3xl md:text-4xl font-black uppercase tracking-tighter leading-none">Official<br>Terminal</h2>
+            </div>
+            <form id="admin-login-form">
+                <div class="mb-4">
+                    <label class="block font-black uppercase mb-2 text-xs md:text-sm">Authorized Identity Key</label>
+                    <input type="text" id="op-id" class="w-full px-4 py-3 uppercase text-sm" placeholder="e.g. JS-POL-001" required>
+                </div>
+                <div class="mb-6">
+                    <label class="block font-black uppercase mb-2 text-xs md:text-sm">Password</label>
+                    <input type="password" id="op-key" class="w-full px-4 py-3 text-sm" placeholder="••••••••" required>
+                </div>
+                <div id="login-error" class="hidden mb-4 bg-brand-red text-white font-black text-xs p-2 text-center border-2 border-black uppercase">
+                    INVALID CREDENTIALS. ACCESS DENIED.
+                </div>
+                <button type="submit" class="w-full bg-black text-white font-black text-lg py-4 border-4 border-black hover:bg-brand-cyan hover:text-black transition-colors uppercase tracking-widest shadow-brutal-sm flex items-center justify-center gap-2">
+                    <span class="material-symbols-outlined">login</span> Authenticate
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- TRACK REPORT STATUS MODAL -->
+    <div id="track-modal" class="hidden fixed inset-0 z-[300] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white border-4 border-black p-6 md:p-8 max-w-md w-full shadow-brutal relative">
+            <button onclick="document.getElementById('track-modal').classList.add('hidden')" class="absolute top-2 right-4 font-black text-4xl hover:text-brand-red transition-colors">&times;</button>
+            <div class="flex items-center gap-2 mb-6 border-b-4 border-black pb-4">
+                <span class="material-symbols-outlined text-4xl text-brand-purple">search</span>
+                <h2 class="text-3xl md:text-4xl font-black uppercase tracking-tighter leading-none">Track<br>Safety Report</h2>
+            </div>
+            <form id="track-form">
+                <div class="mb-4">
+                    <label class="block font-black uppercase mb-2 text-xs md:text-sm">Reference Code</label>
+                    <input type="text" id="track-id" class="w-full px-4 py-3 uppercase text-sm" placeholder="e.g. JS-4912" required>
+                </div>
+                <div id="track-result" class="hidden mb-4 p-4 border-4 border-black bg-gray-100 font-mono text-xs md:text-sm uppercase font-bold space-y-2 overflow-x-auto"></div>
+                <div id="track-error" class="hidden mb-4 bg-brand-red text-white font-black text-xs p-2 text-center border-2 border-black">REPORT NOT FOUND. CHECK REFERENCE.</div>
+                <button type="submit" class="w-full bg-brand-purple text-white font-black text-lg py-4 border-4 border-black hover:bg-black transition-colors uppercase tracking-widest shadow-brutal-sm">Verify Status</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- SUBMISSION CONFIRMATION MODAL -->
+    <div id="success-modal" class="hidden fixed inset-0 z-[300] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-brand-yellow border-4 border-black p-6 md:p-8 max-w-lg w-full shadow-brutal relative text-center">
+            <button onclick="document.getElementById('success-modal').classList.add('hidden')" class="absolute top-2 right-4 font-black text-4xl hover:text-brand-red transition-colors">&times;</button>
+            <span class="material-symbols-outlined text-[64px] md:text-[80px] mb-2 block text-black">verified</span>
+            <h2 class="text-3xl md:text-5xl font-black uppercase tracking-tighter leading-none mb-2">Alert Logged!</h2>
+            <p class="font-bold text-sm md:text-base mb-6">Incident committed to real-time dispatch network.</p>
+            <div class="bg-white border-4 border-black p-4 md:p-6 mb-8 shadow-brutal-sm transform -rotate-1">
+                <p class="font-black uppercase text-xs text-gray-600 mb-1 tracking-widest">Tracking Reference</p>
+                <p id="success-ref-id" class="font-black text-3xl md:text-4xl text-brand-red tracking-widest">JS-XXXX</p>
+                <p class="font-mono text-[10px] font-bold text-gray-500 mt-2">SAVE REFERENCE FOR STATUS VERIFICATION</p>
+            </div>
+            <button onclick="document.getElementById('success-modal').classList.add('hidden')" class="w-full bg-black text-white font-black text-lg py-4 border-4 border-black hover:bg-brand-cyan hover:text-black transition-colors uppercase tracking-widest shadow-brutal-sm">Acknowledge</button>
+        </div>
+    </div>
+
+    <!-- TOP EMERGENCY HELPLINE RIBBON -->
+    <div class="bg-black text-white px-4 py-2 border-b-2 border-black flex items-center justify-between font-mono text-xs font-bold flex-wrap gap-2">
+        <div class="flex items-center gap-2">
+            <span class="w-2 h-2 bg-brand-red rounded-full animate-pulse"></span>
+            <span class="text-brand-yellow uppercase tracking-widest">EMERGENCY HELPLINES:</span>
+        </div>
+        <div class="flex items-center gap-4 flex-wrap">
+            <a href="tel:112" class="hover:text-brand-yellow flex items-center gap-1"><span class="bg-white text-black px-1.5 py-0.5">112</span> National Emergency</a>
+            <a href="tel:108" class="hover:text-brand-yellow flex items-center gap-1"><span class="bg-brand-red px-1.5 py-0.5 text-white">108</span> Ambulance / Medical</a>
+        </div>
+    </div>
+
+    <!-- MAIN NAVIGATION HEADER -->
+    <nav class="sticky top-0 w-full z-50 bg-brand-yellow border-b-4 border-black">
+        <div class="flex flex-col md:flex-row justify-between items-center px-4 md:px-6 py-3 w-full max-w-7xl mx-auto gap-3 md:gap-0">
+            <div class="flex items-center gap-3 cursor-pointer w-full md:w-auto justify-between md:justify-start" onclick="window.scrollTo(0,0)">
+                <div class="flex items-center gap-3">
+                    <div class="bg-black text-brand-yellow p-1.5 border-4 border-black shadow-brutal-sm">
+                        <span class="material-symbols-outlined text-[26px] md:text-[32px] block">health_and_safety</span>
+                    </div>
+                    <div class="flex flex-col leading-[0.85]">
+                        <span class="font-black text-2xl md:text-3xl uppercase tracking-tighter">JAN</span>
+                        <span class="font-black text-base md:text-lg uppercase tracking-tighter text-brand-red">SURAKSHA</span>
+                    </div>
+                </div>
+                <span class="md:hidden bg-black text-white text-[10px] font-black px-2 py-1 uppercase border border-black">Public Safety</span>
+            </div>
+            
+            <div class="flex items-center justify-center gap-2 md:gap-4 w-full md:w-auto flex-wrap">
+                <button onclick="document.getElementById('track-modal').classList.remove('hidden')" class="bg-brand-cyan text-black font-black px-3 py-2 text-xs md:text-sm border-2 md:border-4 border-black uppercase tracking-widest shadow-brutal hover:shadow-brutal-sm transition-all flex items-center gap-1">
+                    <span class="material-symbols-outlined text-[16px]">search</span> Track Report
+                </button>
+                <button onclick="document.getElementById('admin-modal').classList.remove('hidden')" class="bg-white text-black font-black px-3 py-2 text-xs md:text-sm border-2 md:border-4 border-black uppercase tracking-widest shadow-brutal hover:shadow-brutal-sm transition-all">
+                    Official Portal
+                </button>
+                <a href="#report" class="bg-brand-red text-white font-black px-4 py-2 text-xs md:text-sm border-2 md:border-4 border-black uppercase tracking-widest shadow-brutal hover:shadow-brutal-sm transition-all text-center">
+                    Report Incident
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="relative z-10 pt-8 pb-24 space-y-12 md:space-y-16">
+        <!-- HERO SECTION -->
+        <section class="max-w-7xl mx-auto px-4 md:px-6 framer-reveal flex flex-col lg:flex-row items-center gap-8 md:gap-12 mt-4">
+            <div class="w-full lg:w-1/2 space-y-6 bg-white border-4 border-black p-6 md:p-8 shadow-brutal z-10">
+                <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-black text-brand-yellow border-2 border-black">
+                    <span class="font-mono font-black uppercase tracking-widest text-[10px] md:text-xs flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 bg-brand-red rounded-full animate-ping"></span> 
+                        Smart Urban Surveillance
+                    </span>
+                </div>
+                <h1 class="text-4xl md:text-6xl font-black uppercase tracking-tighter leading-[0.95] text-black">
+                    Safe Streets.<br/>
+                    <span class="text-brand-red underline decoration-6 md:decoration-8 underline-offset-8">Smart Dispatch.</span>
+                </h1>
+                <p class="font-black text-base md:text-lg leading-relaxed border-l-8 border-brand-yellow pl-4 text-gray-800">
+                    Real-time AI monitoring detecting medical emergencies, sudden falls, and severe waterlogging. Connected directly to nearby EMS and Civic response teams.
+                </p>
+                <div class="flex flex-col sm:flex-row gap-4 pt-2">
+                    <a href="#report" class="bg-black text-white font-black uppercase tracking-widest px-6 py-4 border-4 border-black shadow-brutal hover:translate-x-1 hover:translate-y-1 hover:shadow-brutal-sm transition-all flex items-center justify-center gap-2 text-base md:text-lg">
+                        Submit Report <span class="material-symbols-outlined font-bold">arrow_forward</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- STATIC CCTV SENSOR PREVIEW -->
+            <div class="w-full lg:w-1/2 relative z-10">
+                <div class="bg-brand-cyan border-4 border-black shadow-brutal p-2 relative aspect-video flex flex-col">
+                    <div class="w-full h-8 md:h-10 bg-black flex items-center px-3 justify-between text-white border-b-4 border-black font-mono font-black uppercase tracking-widest text-[10px] md:text-xs">
+                        <span>SYS.CAM.01</span>
+                        <span class="text-brand-yellow">AI KINEMATIC ENGINE</span>
+                        <div class="w-2.5 h-2.5 bg-brand-red rounded-full animate-pulse"></div>
+                    </div>
+                    <div class="relative flex-1 bg-black overflow-hidden border-4 border-black mt-2 flex items-center justify-center">
+                        <img src="https://images.unsplash.com/photo-1584433144859-1fc3ab64a957?auto=format&fit=crop&w=1000&q=80" class="w-full h-full object-cover grayscale contrast-[1.2] brightness-90 opacity-90" alt="CCTV Surveillance Monitoring Everything">
+                        <div class="absolute bottom-2 left-2 bg-white/90 border-2 border-black p-1.5 shadow-brutal-sm font-mono text-[9px] md:text-[11px] font-black uppercase">
+                            Skeleton Tracking • Velocity Drop • Pixel Surging
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- LIVE IMPACT STATS -->
+        <section class="max-w-7xl mx-auto px-4 md:px-6 relative z-20 framer-reveal">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-0 border-4 border-black shadow-brutal">
+                <div class="bg-brand-cyan p-6 md:p-8 border-b-4 md:border-b-0 md:border-r-4 border-black flex flex-col justify-center items-center text-center">
+                    <span class="material-symbols-outlined text-4xl md:text-5xl mb-1 text-black">verified_user</span>
+                    <h3 class="font-black text-5xl md:text-6xl tracking-tighter" id="pub-stat-solved">0</h3>
+                    <p class="font-bold uppercase text-xs md:text-sm mt-1 tracking-widest text-gray-800">Cases Resolved</p>
+                </div>
+                <div class="bg-brand-yellow p-6 md:p-8 border-b-4 md:border-b-0 md:border-r-4 border-black flex flex-col justify-center items-center text-center">
+                    <span class="material-symbols-outlined text-4xl md:text-5xl mb-1 text-black">videocam</span>
+                    <h3 class="font-black text-5xl md:text-6xl tracking-tighter" id="pub-stat-cctv">0</h3>
+                    <p class="font-bold uppercase text-xs md:text-sm mt-1 tracking-widest text-gray-800">Smart Guard Nodes</p>
+                </div>
+                <div class="bg-brand-red text-white p-6 md:p-8 flex flex-col justify-center items-center text-center">
+                    <span class="material-symbols-outlined text-4xl md:text-5xl mb-1">security</span>
+                    <h3 class="font-black text-5xl md:text-6xl tracking-tighter">24/7</h3>
+                    <p class="font-bold uppercase text-xs md:text-sm mt-1 tracking-widest text-gray-200">Continuous Over-Watch</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- CORE SAFETY SPECIALIZATIONS -->
+        <section id="features" class="max-w-7xl mx-auto px-4 md:px-6 framer-reveal">
+            <h2 class="text-3xl md:text-5xl font-black uppercase tracking-tighter mb-8 text-center bg-black text-white inline-block px-6 py-3 rotate-1 shadow-brutal relative left-1/2 -translate-x-1/2">
+                Core System Features
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-red-100 border-4 border-black p-6 shadow-brutal hover:-translate-y-1 transition-transform">
+                    <span class="material-symbols-outlined text-5xl text-red-700 mb-3">medical_services</span>
+                    <h3 class="font-black uppercase text-xl mb-2">Medical Fall Detection</h3>
+                    <p class="font-bold text-xs md:text-sm text-gray-800">
+                        Tracks skeletal body angles and velocity drops to instantly detect if an individual has collapsed on the street, filtering out people sitting or tying shoes.
+                    </p>
+                </div>
+                <div class="bg-blue-100 border-4 border-black p-6 shadow-brutal hover:-translate-y-1 transition-transform">
+                    <span class="material-symbols-outlined text-5xl text-blue-700 mb-3">water_damage</span>
+                    <h3 class="font-black uppercase text-xl mb-2">Waterlogging Diagnostics</h3>
+                    <p class="font-bold text-xs md:text-sm text-gray-800">
+                        Fuses AI visual pixel-surge tracking with IoT telemetry sensors to definitively identify drainage failure and alert civic authorities immediately.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- REPORTING FORM -->
+        <section id="report" class="framer-reveal pt-4">
+            <div class="max-w-4xl mx-auto px-4 md:px-6">
+                <div class="mb-8 bg-brand-red text-white border-4 border-black p-6 md:p-8 shadow-brutal rotate-[-1deg]">
+                    <h2 class="text-3xl md:text-5xl font-black uppercase tracking-tighter mb-2 leading-none">Submit Incident Report</h2>
+                    <p class="font-bold text-sm md:text-base">Upload geo-referenced evidence directly to the command desk.</p>
+                </div>
+
+                <form id="report-form" class="bg-white border-4 border-black p-6 md:p-10 shadow-brutal space-y-8">
+                    <input type="hidden" id="report-lat" value="">
+                    <input type="hidden" id="report-lng" value="">
+
+                    <!-- 1. Incident Type Selection -->
+                    <div>
+                        <label class="block font-black uppercase text-lg md:text-xl mb-3">1. Select Incident Nature</label>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <label class="cursor-pointer">
+                                <input type="radio" name="concern" value="Sudden Fall / Medical Emergency" class="peer hidden" checked>
+                                <div class="border-4 border-black p-4 text-center peer-checked:bg-brand-red peer-checked:text-white hover:bg-gray-100 flex flex-col items-center gap-2 transition-all h-full justify-center">
+                                    <span class="material-symbols-outlined text-3xl">medical_services</span>
+                                    <span class="font-black uppercase text-xs">Medical Collapse / Fall</span>
+                                </div>
+                            </label>
+
+                            <label class="cursor-pointer">
+                                <input type="radio" name="concern" value="Waterlogging / Drainage Failure" class="peer hidden">
+                                <div class="border-4 border-black p-4 text-center peer-checked:bg-blue-600 peer-checked:text-white hover:bg-gray-100 flex flex-col items-center gap-2 transition-all h-full justify-center">
+                                    <span class="material-symbols-outlined text-3xl">water_damage</span>
+                                    <span class="font-black uppercase text-xs">Waterlogging / Flood</span>
+                                </div>
+                            </label>
+
+                            <label class="cursor-pointer">
+                                <input type="radio" name="concern" value="Other Public Emergency" class="peer hidden">
+                                <div class="border-4 border-black p-4 text-center peer-checked:bg-black peer-checked:text-white hover:bg-gray-100 flex flex-col items-center gap-2 transition-all h-full justify-center">
+                                    <span class="material-symbols-outlined text-3xl">warning</span>
+                                    <span class="font-black uppercase text-xs">Other Public Hazard</span>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 2. Severity Assessment -->
+                    <div class="border-t-4 border-black pt-6">
+                        <label class="block font-black uppercase text-lg md:text-xl mb-3">2. Urgency Level</label>
+                        <div class="grid grid-cols-3 gap-3">
+                            <label class="cursor-pointer">
+                                <input type="radio" name="severity" value="Low / Surveillance Queue" class="peer hidden">
+                                <div class="border-4 border-black p-3 text-center peer-checked:bg-brand-yellow hover:bg-gray-100 transition-all">
+                                    <span class="font-black uppercase text-sm block">Low</span>
+                                    <p class="text-[10px] font-bold text-gray-700 hidden md:block">Surveillance Queue</p>
+                                </div>
+                            </label>
+                            <label class="cursor-pointer">
+                                <input type="radio" name="severity" value="Medium / Rapid Review" class="peer hidden">
+                                <div class="border-4 border-black p-3 text-center peer-checked:bg-orange-400 hover:bg-gray-100 transition-all">
+                                    <span class="font-black uppercase text-sm block">Medium</span>
+                                    <p class="text-[10px] font-bold text-gray-700 hidden md:block">Rapid Review</p>
+                                </div>
+                            </label>
+                            <label class="cursor-pointer">
+                                <input type="radio" name="severity" value="High / Critical Danger" class="peer hidden" checked>
+                                <div class="border-4 border-black p-3 text-center peer-checked:bg-brand-red peer-checked:text-white hover:bg-gray-100 transition-all">
+                                    <span class="font-black uppercase text-sm block">Critical</span>
+                                    <p class="text-[10px] font-bold hidden md:block">Immediate Response</p>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 3. Proof Evidence Upload -->
+                    <div class="border-t-4 border-black pt-6">
+                        <label class="block font-black uppercase text-lg md:text-xl mb-3">3. Upload Ground Evidence (Photo)</label>
+                        <input type="file" id="media-file" accept="image/*" class="hidden" required>
+                        <label for="media-file" class="border-4 border-dashed border-black bg-gray-100 p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-brand-yellow transition-colors group">
+                            <span class="material-symbols-outlined text-[42px]">add_a_photo</span>
+                            <div class="font-black uppercase tracking-widest text-sm text-center mt-2" id="file-label-text">Tap To Select Photo</div>
+                            <div class="font-mono text-[10px] font-bold text-brand-red uppercase mt-1">Upload Limit: 15MB</div>
+                        </label>
+                    </div>
+
+                    <!-- 4. Location Pin -->
+                    <div class="border-t-4 border-black pt-6">
+                        <label class="block font-black uppercase text-lg md:text-xl mb-3">4. Incident Location</label>
+                        <div id="map-wrapper" class="mb-3">
+                            <div id="map-container" class="shadow-brutal-sm"></div>
+                            <p class="font-mono text-[10px] font-bold text-gray-600 mt-1 uppercase">📍 Drag pin to update exact location.</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <input type="text" id="landmark-input" placeholder="ENTER STREET ADDRESS..." class="flex-1 px-4 py-3 uppercase text-xs md:text-sm font-bold" required>
+                            <button type="button" id="geo-btn" title="Acquire GPS Lock" class="bg-black text-white border-4 border-black px-4 py-3 hover:bg-brand-yellow hover:text-black transition-colors flex items-center justify-center shadow-brutal-sm">
+                                <span class="material-symbols-outlined text-[24px]">my_location</span>
+                            </button>
+                        </div>
+                        <span id="geo-status" class="font-mono text-[10px] font-bold uppercase mt-1 block text-brand-red"></span>
+                    </div>
+
+                    <!-- 5. Incident Summary -->
+                    <div class="border-t-4 border-black pt-6">
+                        <label class="block font-black uppercase text-lg md:text-xl mb-2">5. Description Details</label>
+                        <textarea id="details-input" rows="3" placeholder="DESCRIBE THE EMERGENCY OR HAZARD..." class="w-full px-4 py-3 uppercase resize-none text-xs md:text-sm font-bold" required></textarea>
+                    </div>
+
+                    <button type="submit" id="submit-btn" class="w-full bg-brand-red text-white font-black text-xl md:text-2xl py-5 border-4 border-black hover:bg-black transition-colors uppercase tracking-widest shadow-brutal flex justify-center items-center gap-2">
+                        <span id="btn-text">Submit Urgent Report</span>
+                        <span id="btn-spinner" class="material-symbols-outlined animate-spin hidden">autorenew</span>
+                    </button>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="w-full py-8 px-4 md:px-6 bg-black border-t-8 border-brand-yellow text-white">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6 text-center md:text-left">
+            <div class="flex items-center gap-3">
+                <div class="bg-white text-black p-1 border-2 border-brand-yellow">
+                    <span class="material-symbols-outlined text-[28px] block">health_and_safety</span>
+                </div>
+                <div>
+                    <div class="font-black text-2xl uppercase tracking-tighter leading-none text-white">
+                        JAN <span class="text-brand-red">SURAKSHA</span>
+                    </div>
+                    <div class="font-mono font-bold uppercase text-brand-cyan text-[10px] tracking-widest">
+                        Smart City Emergency Surveillance
+                    </div>
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-4 md:gap-6 justify-center font-black uppercase tracking-widest text-xs">
+                <a onclick="document.getElementById('track-modal').classList.remove('hidden')" class="hover:text-brand-yellow cursor-pointer underline">Track Report</a>
+                <a onclick="document.getElementById('admin-modal').classList.remove('hidden')" class="hover:text-brand-cyan cursor-pointer underline">Official Terminal</a>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        const BACKEND_ORIGIN = "https://jan-suraksha.onrender.com";
+        const API_BASE = BACKEND_ORIGIN + "/api";
+        let map, marker, accuracyCircle;
+        const defaultLat = 26.4499, defaultLng = 80.3319;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const observer = new IntersectionObserver(entries => {
+                entries.forEach(entry => { 
+                    if (entry.isIntersecting) entry.target.classList.add('visible'); 
+                });
+            }, { threshold: 0.1 });
+            
+            document.querySelectorAll('.framer-reveal').forEach(el => observer.observe(el));
+            
+            initMap();
+            fetchPublicStats();
+            setInterval(fetchPublicStats, 5000);
+        });
+
+        // --- MAP & GEOLOCATION ---
+        function initMap() {
+            map = L.map('map-container').setView([defaultLat, defaultLng], 15);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
+                attribution: '&copy; OpenStreetMap' 
+            }).addTo(map);
+
+            marker = L.marker([defaultLat, defaultLng], { draggable: true }).addTo(map);
+            reverseGeocodePrecise(defaultLat, defaultLng, null);
+
+            marker.on('dragend', function() {
+                const pos = marker.getLatLng();
+                reverseGeocodePrecise(pos.lat, pos.lng, null);
+            });
+        }
+
+        async function reverseGeocodePrecise(lat, lon, accuracy) {
+            const landmarkInput = document.getElementById('landmark-input');
+            const statusBox = document.getElementById('geo-status');
+            document.getElementById('report-lat').value = lat;
+            document.getElementById('report-lng').value = lon;
+
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`);
+                const data = await res.json();
+                if (data && data.address) {
+                    const postCode = data.address.postcode ? ` ${data.address.postcode}` : " 208016";
+                    landmarkInput.value = `${data.display_name.split(',').slice(0, 4).join(',').trim()}${postCode}`.toUpperCase();
+                    statusBox.innerText = "LOCATION CONFIRMED.";
+                    statusBox.classList.replace('text-brand-red', 'text-black');
+                }
+            } catch (err) {
+                landmarkInput.value = "PINNED COORDINATE LOCATION";
+            }
+        }
+
+        document.getElementById('geo-btn').addEventListener('click', () => {
+            const statusBox = document.getElementById('geo-status');
+            if (!("geolocation" in navigator)) {
+                statusBox.innerText = "GPS HARDWARE NOT AVAILABLE.";
+                return;
+            }
+            statusBox.innerText = "LOCKING ON SATELLITE GPS...";
+            statusBox.classList.replace('text-brand-red', 'text-black');
+
+            navigator.geolocation.getCurrentPosition(
+                pos => {
+                    const lat = pos.coords.latitude;
+                    const lon = pos.coords.longitude;
+                    map.setView([lat, lon], 16);
+                    marker.setLatLng([lat, lon]);
+
+                    if (accuracyCircle) map.removeLayer(accuracyCircle);
+                    accuracyCircle = L.circle([lat, lon], {
+                        radius: pos.coords.accuracy || 30,
+                        color: '#FF3333',
+                        fillColor: '#8B5CF6',
+                        fillOpacity: 0.2
+                    }).addTo(map);
+
+                    reverseGeocodePrecise(lat, lon, pos.coords.accuracy);
+                },
+                err => {
+                    statusBox.innerText = "GPS LOCK FAILED: " + err.message.toUpperCase();
+                    statusBox.classList.add('text-brand-red');
+                },
+                { enableHighAccuracy: true, timeout: 10000 }
+            );
+        });
+
+        document.getElementById('media-file').addEventListener('change', function(e) {
+            const fileName = e.target.files[0] ? e.target.files[0].name : 'Tap To Select Photo';
+            document.getElementById('file-label-text').innerText = 'SELECTED: ' + fileName.toUpperCase();
+        });
+
+        // --- REPORT FORM SUBMIT ---
+        document.getElementById('report-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const submitBtn = document.getElementById('submit-btn');
+            const btnText = document.getElementById('btn-text');
+            const btnSpinner = document.getElementById('btn-spinner');
+
+            const concernNode = document.querySelector('input[name="concern"]:checked');
+            const severityNode = document.querySelector('input[name="severity"]:checked');
+            const mediaFile = document.getElementById('media-file');
+
+            if (!concernNode || !severityNode) {
+                alert("Please select both the incident nature and urgency level.");
+                return;
+            }
+            if (mediaFile.files.length === 0) {
+                alert("Please attach photo proof.");
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.classList.replace('bg-brand-red', 'bg-black');
+            btnText.innerText = 'TRANSMITTING EVIDENCE...';
+            btnSpinner.classList.remove('hidden');
+
+            const reader = new FileReader();
+            reader.onload = async function(event) {
+                const payload = {
+                    concern_type: concernNode.value,
+                    severity: severityNode.value,
+                    landmark: document.getElementById('landmark-input').value,
+                    details: document.getElementById('details-input').value,
+                    lat: document.getElementById('report-lat').value ? parseFloat(document.getElementById('report-lat').value) : null,
+                    lng: document.getElementById('report-lng').value ? parseFloat(document.getElementById('report-lng').value) : null,
+                    media_url: event.target.result
+                };
+
+                try {
+                    const res = await fetch(API_BASE + "/reports", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        document.getElementById('success-ref-id').innerText = `JS-${data.ref}`;
+                        document.getElementById('success-modal').classList.remove('hidden');
+                        document.getElementById('report-form').reset();
+                        document.getElementById('file-label-text').innerText = 'Tap To Select Photo';
+                    }
+                } catch (err) {
+                    alert("Submission failed. Could not reach the server. It may be waking up - please wait a few seconds and try again.");
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.classList.replace('bg-black', 'bg-brand-red');
+                    btnText.innerText = 'Submit Urgent Report';
+                    btnSpinner.classList.add('hidden');
+                }
+            };
+            reader.readAsDataURL(mediaFile.files[0]);
+        });
+
+        // --- TRACK FORM ---
+        document.getElementById('track-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const refId = document.getElementById('track-id').value;
+            const resultBox = document.getElementById('track-result');
+            const errorBox = document.getElementById('track-error');
+
+            resultBox.classList.add('hidden');
+            errorBox.classList.add('hidden');
+
+            try {
+                const res = await fetch(API_BASE + "/reports/track/" + refId);
+                if (res.ok) {
+                    const data = await res.json();
+                    let statusColor = "text-brand-yellow bg-black px-2 py-0.5";
+                    if (data.status.toLowerCase().includes('resolve')) statusColor = "text-green-400 bg-black px-2 py-0.5";
+                    if (data.status.toLowerCase().includes('decline')) statusColor = "text-brand-red bg-black px-2 py-0.5";
+
+                    resultBox.innerHTML = `
+                        <p class="text-gray-500">Incident: <span class="text-black font-bold">${data.concern}</span></p>
+                        <p class="text-gray-500">Logged On: <span class="text-black font-bold">${data.date}</span></p>
+                        <p class="text-gray-500 mt-2">Status: <span class="${statusColor} font-black">${data.status}</span></p>
+                    `;
+                    resultBox.classList.remove('hidden');
+                } else {
+                    errorBox.classList.remove('hidden');
+                }
+            } catch (err) {
+                errorBox.innerText = "SERVER DISCONNECTED.";
+                errorBox.classList.remove('hidden');
+            }
+        });
+
+        // --- ADMIN / RESPONDER LOGIN ---
+        document.getElementById('admin-login-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const operatorId = document.getElementById('op-id').value;
+            const authKey = document.getElementById('op-key').value;
+            const errorBox = document.getElementById('login-error');
+
+            try {
+                const res = await fetch(API_BASE + "/auth/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ operator_id: operatorId, auth_key: authKey })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.role === 'responder') {
+                        localStorage.setItem('js_responder_dept', data.department || "POLICE");
+                        window.location.href = 'responder.html';
+                    } else {
+                        window.location.href = 'admin.html';
+                    }
+                } else {
+                    errorBox.classList.remove('hidden');
+                }
+            } catch (err) {
+                errorBox.innerText = "AUTHENTICATION SERVER OFFLINE";
+                errorBox.classList.remove('hidden');
+            }
+        });
+
+        async function fetchPublicStats() {
+            try {
+                const res = await fetch(API_BASE + "/stats");
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('pub-stat-solved').innerText = data.cases_solved;
+                    document.getElementById('pub-stat-cctv').innerText = data.active_cctv_nodes;
+                }
+            } catch (err) {}
+        }
+    </script>
+</body>
+</html>

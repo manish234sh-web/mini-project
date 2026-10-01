@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>JAN SURAKSHA | Admin Command Dashboard</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;900&family=Geist:wght@500;700;900&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: { "brand-yellow": "#FFCC00", "brand-red": "#FF3333", "brand-cyan": "#00E5FF", },
+            fontFamily: { "sans": ["Manrope", "sans-serif"], "mono": ["Geist", "monospace"], },
+            boxShadow: { "brutal": "6px 6px 0px 0px rgba(0,0,0,1)", "brutal-sm": "3px 3px 0px 0px rgba(0,0,0,1)", }
+          },
+        },
+      }
+    </script>
+    <style>
+        body { background-color: #F4F4F0; color: #000; overflow-x: hidden; scroll-behavior: smooth; }
+        .framer-reveal { opacity: 0; transform: translateY(30px); transition: opacity 0.6s ease-out, transform 0.6s ease-out; }
+        .framer-reveal.visible { opacity: 1; transform: translateY(0); }
+        #verify-map { height: 100%; min-height: 300px; width: 100%; border: 4px solid black; }
+        .table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 4px solid black; }
+        table { min-width: 600px; } 
+    </style>
+</head>
+<body class="antialiased font-sans min-h-screen flex flex-col">
+
+    <div id="incoming-alert-overlay" class="hidden fixed inset-0 z-[400] bg-brand-red flex flex-col items-center justify-center cursor-pointer" onclick="this.classList.add('hidden')">
+        <span class="material-symbols-outlined text-white text-[120px] animate-pulse">warning</span>
+        <h1 class="text-white font-black text-6xl md:text-8xl uppercase tracking-tighter text-center mt-4">Incoming<br>Emergency</h1>
+        <p class="text-white font-bold mt-4 font-mono">CLICK ANYWHERE TO SILENCE</p>
+    </div>
+
+    <!-- Verify Report Modal -->
+    <div id="verify-modal" class="hidden fixed inset-0 z-[300] bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 md:p-4">
+        <div class="bg-white border-4 border-black p-4 md:p-6 max-w-5xl w-full shadow-brutal relative max-h-[95vh] overflow-y-auto">
+            <button onclick="closeVerifyModal()" class="absolute top-2 right-4 font-black text-4xl hover:text-brand-red transition-colors">&times;</button>
+            <div class="flex items-center gap-2 mb-4 border-b-4 border-black pb-4">
+                <span class="material-symbols-outlined text-3xl md:text-4xl text-brand-red">policy</span>
+                <h2 class="text-2xl md:text-3xl font-black uppercase tracking-tighter leading-none">Command Center<br><span class="text-brand-red text-lg md:text-3xl">Incident Verification</span></h2>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Data & Evidence Section -->
+                <div class="space-y-4">
+                    <div class="bg-gray-100 border-2 border-black p-4 font-mono text-sm font-bold uppercase space-y-2">
+                        <p><span class="text-gray-500">Concern:</span> <span id="v-concern" class="text-black"></span></p>
+                        <p><span class="text-gray-500">AI Confidence:</span> <span id="v-severity" class="text-brand-red font-black text-lg"></span></p>
+                        <p><span class="text-gray-500">Address:</span> <span id="v-address" class="text-black"></span></p>
+                        <p><span class="text-gray-500">Details:</span> <span id="v-details" class="text-black whitespace-pre-wrap"></span></p>
+                    </div>
+                    
+                    <div id="v-media-container" class="border-4 border-black bg-gray-200 hidden w-full">
+                        <h3 class="font-black uppercase text-xs p-2 bg-black text-white flex justify-between">
+                            ATTACHED EVIDENCE <span class="hidden md:inline">(CLICK IMAGES TO ENLARGE)</span>
+                        </h3>
+                        <div class="p-4 bg-white flex flex-col items-center gap-4 w-full min-h-[150px]">
+                            <!-- Video Player -->
+                            <video id="v-video" controls autoplay loop class="w-full object-contain max-h-[300px] hidden border-2 border-black shadow-brutal-sm"></video>
+                            <img id="v-image" class="w-full object-contain max-h-[300px] hidden border-2 border-black cursor-pointer shadow-brutal-sm">
+                            
+                            <!-- Snapshot Grid directly below the video -->
+                            <div id="v-snapshots-container" class="grid grid-cols-3 gap-2 w-full hidden"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- GPS Map Section -->
+                <div class="space-y-2 flex flex-col h-full min-h-[300px]">
+                    <h3 class="font-black uppercase">GPS Satellite Location</h3>
+                    <div id="verify-map" class="border-4 border-black shadow-brutal-sm bg-gray-200 flex-1"></div>
+                    <div id="verify-map-nogps" class="hidden border-4 border-black shadow-brutal-sm bg-gray-200 flex-1 flex-col items-center justify-center p-8 text-center font-bold text-gray-500">
+                        <span class="material-symbols-outlined text-4xl block mb-2">location_off</span>
+                        NO EXACT GPS PIN PROVIDED.<br>ADDRESS ENTERED MANUALLY.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex flex-col gap-3 pt-6 border-t-4 border-black mt-6">
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <button onclick="accessCCTV()" class="flex-1 bg-black text-white font-black text-sm md:text-lg py-3 border-4 border-black hover:bg-brand-yellow hover:text-black active:scale-95 transition-all uppercase shadow-brutal-sm flex items-center justify-center gap-2">
+                        <span class="material-symbols-outlined">videocam</span> TAP CCTV
+                    </button>
+                    <button id="v-resolve-btn" class="flex-1 bg-white text-black font-black text-sm md:text-lg py-3 border-4 border-black hover:bg-black hover:text-white active:scale-95 transition-all uppercase shadow-brutal-sm flex items-center justify-center gap-2">
+                        <span class="material-symbols-outlined">check_circle</span> RESOLVE (CLOSE)
+                    </button>
+                    <button id="v-decline-btn" class="flex-1 bg-brand-red text-white font-black text-sm md:text-lg py-3 border-4 border-black hover:bg-black hover:text-white active:scale-95 transition-all uppercase shadow-brutal-sm flex items-center justify-center gap-2">
+                        <span class="material-symbols-outlined">block</span> DECLINE
+                    </button>
+                </div>
+                
+                <div class="flex flex-col sm:flex-row gap-3 mt-2">
+                    <button onclick="dispatchTeam('police')" class="flex-1 bg-brand-cyan text-black font-black text-xs md:text-md py-4 border-4 border-black hover:bg-purple-500 hover:text-white active:scale-95 transition-all uppercase shadow-brutal-sm flex items-center justify-center gap-2">
+                        <span class="material-symbols-outlined">local_police</span> DISPATCH POLICE
+                    </button>
+                    <button onclick="dispatchTeam('ems')" class="flex-1 bg-brand-cyan text-black font-black text-xs md:text-md py-4 border-4 border-black hover:bg-red-500 hover:text-white active:scale-95 transition-all uppercase shadow-brutal-sm flex items-center justify-center gap-2">
+                        <span class="material-symbols-outlined">ambulance</span> DISPATCH EMS
+                    </button>
+                    <button onclick="dispatchTeam('civic')" class="flex-1 bg-brand-cyan text-black font-black text-xs md:text-md py-4 border-4 border-black hover:bg-orange-500 hover:text-white active:scale-95 transition-all uppercase shadow-brutal-sm flex items-center justify-center gap-2">
+                        <span class="material-symbols-outlined">construction</span> DISPATCH CIVIC
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Admin Bar -->
+    <header class="bg-black text-white border-b-4 border-black p-4 sticky top-0 z-50 shadow-brutal-sm">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-2 md:gap-3">
+                <span class="bg-brand-red text-white p-1 border-2 border-white font-mono font-black text-xs">OPERATOR</span>
+                <h1 class="font-black text-lg md:text-2xl uppercase tracking-wider text-brand-yellow">JAN SURAKSHA <span class="hidden md:inline">// COMMAND CENTER</span></h1>
+            </div>
+            <div class="flex items-center gap-4">
+                
+                <a href="#monitoring-section" class="relative bg-white text-black px-4 py-1.5 font-black uppercase text-sm border-2 border-black hover:bg-brand-yellow transition-colors hidden sm:flex items-center gap-2 shadow-brutal-sm">
+                    <span class="material-symbols-outlined text-[18px]">videocam</span> Monitoring Section
+                    <span id="nav-alert-badge" class="hidden absolute -top-3 -right-3 bg-brand-red text-white border-2 border-black rounded-full w-6 h-6 flex items-center justify-center text-xs font-black shadow-brutal-sm animate-bounce">0</span>
+                </a>
+
+                <span class="font-mono text-xs text-brand-cyan hidden md:flex items-center gap-2">
+                    <span class="w-2 h-2 bg-brand-cyan rounded-full animate-pulse"></span> SESSION ACTIVE
+                </span>
+                
+                <a href="index.html" class="bg-brand-red text-white px-4 py-1.5 font-black uppercase text-sm border-2 border-white hover:bg-white hover:text-black transition-colors shadow-brutal-sm hover:translate-x-1 hover:translate-y-1 hover:shadow-none">Logout</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-10 mt-4">
+        
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 framer-reveal">
+            <div class="bg-brand-yellow border-4 border-black p-6 shadow-brutal">
+                <div class="font-mono font-black text-xs uppercase flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[18px]">pending_actions</span> Pending Incidents
+                </div>
+                <div id="stat-pending" class="text-5xl md:text-6xl font-black mt-2">0</div>
+            </div>
+            <div class="bg-brand-cyan border-4 border-black p-6 shadow-brutal">
+                <div class="font-mono font-black text-xs uppercase flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[18px]">verified</span> Total Solved / Resolved
+                </div>
+                <div id="stat-solved" class="text-5xl md:text-6xl font-black mt-2">0</div>
+            </div>
+            <div class="bg-white border-4 border-black p-6 shadow-brutal">
+                <div class="font-mono font-black text-xs uppercase flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[18px]">videocam</span> Active Cameras
+                </div>
+                <div id="stat-cctv" class="text-5xl md:text-6xl font-black mt-2">0</div>
+            </div>
+        </div>
+
+        <div class="bg-white border-4 border-black p-4 shadow-brutal flex flex-wrap items-center justify-between gap-4 framer-reveal">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-3xl">filter_list</span>
+                <span class="font-black uppercase text-xl">Severity Filter:</span>
+            </div>
+            <div class="flex flex-wrap gap-2 w-full md:w-auto">
+                <button onclick="setFilter('ALL')" id="btn-flt-ALL" class="flex-1 md:flex-none bg-black text-white px-4 py-2 border-2 border-black font-black uppercase text-xs md:text-sm transition-colors">ALL</button>
+                <button onclick="setFilter('CRITICAL')" id="btn-flt-CRITICAL" class="flex-1 md:flex-none bg-white text-black px-4 py-2 border-2 border-black font-black uppercase text-xs md:text-sm hover:bg-brand-red hover:text-white transition-colors">HIGH / CRITICAL</button>
+                <button onclick="setFilter('URGENT')" id="btn-flt-URGENT" class="flex-1 md:flex-none bg-white text-black px-4 py-2 border-2 border-black font-black uppercase text-xs md:text-sm hover:bg-orange-500 hover:text-white transition-colors">MEDIUM / URGENT</button>
+                <button onclick="setFilter('REVIEW')" id="btn-flt-REVIEW" class="flex-1 md:flex-none bg-white text-black px-4 py-2 border-2 border-black font-black uppercase text-xs md:text-sm hover:bg-brand-yellow transition-colors">LOW / REVIEW</button>
+            </div>
+        </div>
+
+        <div id="monitoring-section" class="bg-black border-4 border-black p-4 md:p-6 text-white shadow-brutal flex flex-col lg:flex-row gap-8 scroll-mt-24 framer-reveal">
+            <div class="flex-1">
+                <div class="flex justify-between items-center border-b-4 border-gray-700 pb-4 mb-4">
+                    <h2 class="font-black text-brand-yellow uppercase text-xl md:text-2xl flex items-center gap-2">
+                        <span class="material-symbols-outlined">satellite_alt</span> MONITORING SECTION
+                    </h2>
+                    <span id="cctv-pulse" class="w-4 h-4 bg-brand-red rounded-full animate-pulse"></span>
+                </div>
+                <div class="bg-gray-900 border-4 border-white aspect-video relative flex items-center justify-center overflow-hidden">
+                    <img id="live-feed" class="w-full h-full object-contain" alt="Live Feed">
+                    <div id="live-feed-placeholder" class="absolute inset-0 flex items-center justify-center text-gray-400 font-mono text-xs uppercase tracking-wide">
+                        Connecting to camera feed...
+                    </div>
+                </div>
+            </div>
+            <div class="w-full lg:w-1/3 flex flex-col justify-center space-y-6">
+                <div>
+                    <h3 class="font-black text-2xl md:text-3xl uppercase text-brand-cyan mb-2" id="cctv-label">HEADQUARTERS CAM 01</h3>
+                    <p class="font-mono text-gray-400 text-xs md:text-sm">Direct multi-model AI stream. Monitoring for Medical Emergencies, Waterlogging, and Infrastructure Hazards in real-time.</p>
+                </div>
+                <div class="border-2 border-gray-700 p-4 space-y-2 font-mono text-xs md:text-sm">
+                    <div class="flex justify-between border-b border-gray-700 pb-1">
+                        <span>STATUS:</span><span class="text-green-500 font-bold" id="cctv-status">ONLINE / AI ACTIVE</span>
+                    </div>
+                    <div class="flex justify-between border-b border-gray-700 pb-1">
+                        <span>LATENCY:</span><span class="text-brand-yellow">12ms</span>
+                    </div>
+                    <div class="flex justify-between border-b border-gray-700 pb-1">
+                        <span>ACTIVE MODELS:</span><span class="text-brand-cyan">YOLOv8-POSE</span>
+                    </div>
+                </div>
+                <button onclick="handleRefresh(this)" class="bg-white text-black font-black uppercase py-4 border-4 border-white hover:bg-brand-yellow hover:border-brand-yellow active:scale-95 transition-all shadow-brutal-sm w-full text-sm">
+                    Re-Sync Camera Feed
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-white border-4 border-black p-4 md:p-6 shadow-brutal flex flex-col framer-reveal">
+            <div class="flex justify-between items-center border-b-4 border-black pb-4 mb-6">
+                <h2 class="text-xl md:text-3xl font-black uppercase flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[28px] md:text-[32px] text-brand-red">warning</span> Active AI Feed
+                </h2>
+                <button onclick="handleRefresh(this)" class="bg-black text-white px-3 py-2 md:px-4 font-mono text-[10px] md:text-xs uppercase font-bold hover:bg-brand-yellow hover:text-black active:scale-90 transition-all border-2 border-black flex items-center gap-2 shadow-brutal-sm hover:shadow-none">
+                    <span class="material-symbols-outlined text-[16px] transition-transform duration-300">sync</span> <span class="hidden md:inline">SYNC</span>
+                </button>
+            </div>
+            <div class="table-wrapper flex-1">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-black text-white font-mono text-xs uppercase whitespace-nowrap">
+                            <th class="p-3 border-2 border-black">Type</th>
+                            <th class="p-3 border-2 border-black">AI Confidence</th>
+                            <th class="p-3 border-2 border-black">Location</th>
+                            <th class="p-3 border-2 border-black">Status</th>
+                            <th class="p-3 border-2 border-black">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="incidents-table-body"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="bg-white border-4 border-black p-4 md:p-6 shadow-brutal framer-reveal">
+            <div class="flex justify-between items-center border-b-4 border-black pb-4 mb-6">
+                <h2 class="text-xl md:text-3xl font-black uppercase flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[28px] md:text-[32px] text-brand-cyan">campaign</span> Pending Citizen Reports
+                </h2>
+                <button onclick="handleRefresh(this)" class="bg-black text-white px-3 py-2 md:px-4 font-mono text-[10px] md:text-xs uppercase font-bold hover:bg-brand-cyan hover:text-black active:scale-90 transition-all border-2 border-black flex items-center gap-2 shadow-brutal-sm hover:shadow-none">
+                    <span class="material-symbols-outlined text-[16px] transition-transform duration-300">sync</span> <span class="hidden md:inline">SYNC</span>
+                </button>
+            </div>
+            <div class="table-wrapper">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-black text-white font-mono text-xs uppercase whitespace-nowrap">
+                            <th class="p-3 border-2 border-black">Concern</th>
+                            <th class="p-3 border-2 border-black">Severity</th>
+                            <th class="p-3 border-2 border-black">Location</th>
+                            <th class="p-3 border-2 border-black">Status</th>
+                            <th class="p-3 border-2 border-black">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reports-table-body"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="bg-gray-200 border-4 border-black p-4 md:p-6 shadow-brutal framer-reveal mb-12">
+            <div class="flex justify-between items-center border-b-4 border-black pb-4 mb-6">
+                <h2 class="text-xl md:text-3xl font-black text-gray-700 uppercase flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[28px] md:text-[32px]">archive</span> Resolved Operations
+                </h2>
+            </div>
+            <div class="table-wrapper opacity-80">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-400 text-black font-mono text-xs uppercase whitespace-nowrap">
+                            <th class="p-3 border-2 border-black">Concern Type</th>
+                            <th class="p-3 border-2 border-black">AI Confidence / Risk</th>
+                            <th class="p-3 border-2 border-black">Location</th>
+                            <th class="p-3 border-2 border-black">Final Status</th>
+                            <th class="p-3 border-2 border-black">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resolved-incidents-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const BACKEND_ORIGIN = "https://jan-suraksha.onrender.com";
+        const API_BASE = BACKEND_ORIGIN + "/api";
+        let verifyMapInstance = null;
+        let verifyMapMarker = null;
+        window.allIncidents = [];
+        window.allReports = [];
+        let activeFilter = 'ALL';
+        let currentModalReportId = null;
+        let currentModalCollection = null;
+        let previousPendingCount = -1;
+
+        let audioCtx = null;
+        let audioUnlocked = false;
+
+        document.body.addEventListener('click', function() {
+            if (!audioUnlocked) {
+                try {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    gain.gain.value = 0;
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.001);
+                    audioUnlocked = true;
+                } catch (e) {}
+            }
+        });
+
+        function playSynthesizedBeep(freq = 800, duration = 0.25) {
+            if (!audioCtx || !audioUnlocked) return;
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch (err) {}
+        }
+
+        // ----------------- LIVE CAMERA FEED (with auto-retry) -----------------
+        const VIDEO_FEED_URL = BACKEND_ORIGIN + "/video_feed";
+        let feedRetryTimer = null;
+
+        function connectLiveFeed() {
+            const feedImg = document.getElementById('live-feed');
+            const placeholder = document.getElementById('live-feed-placeholder');
+            if (!feedImg) return;
+
+            clearTimeout(feedRetryTimer);
+
+            // Cache-bust so the browser always opens a fresh MJPEG connection
+            feedImg.src = VIDEO_FEED_URL + "?t=" + Date.now();
+
+            feedImg.onload = () => {
+                // Fires once the multipart stream starts delivering frames
+                feedImg.classList.remove('hidden');
+                if (placeholder) placeholder.classList.add('hidden');
+                const statusEl = document.getElementById('cctv-status');
+                if (statusEl) { statusEl.textContent = "ONLINE / AI ACTIVE"; statusEl.className = "text-green-500 font-bold"; }
+            };
+
+            feedImg.onerror = () => {
+                console.warn("[LIVE FEED] Stream unavailable, retrying in 3s...");
+                feedImg.classList.add('hidden');
+                if (placeholder) {
+                    placeholder.textContent = "Camera feed offline — retrying...";
+                    placeholder.classList.remove('hidden');
+                }
+                const statusEl = document.getElementById('cctv-status');
+                if (statusEl) { statusEl.textContent = "OFFLINE / RETRYING"; statusEl.className = "text-brand-red font-bold"; }
+                feedRetryTimer = setTimeout(connectLiveFeed, 3000);
+            };
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            connectLiveFeed();
+
+            const observer = new IntersectionObserver((entries) => { 
+                entries.forEach(entry => { 
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('visible'); 
+                    }
+                }); 
+            }, { threshold: 0.1 });
+            
+            document.querySelectorAll('.framer-reveal').forEach((el) => {
+                observer.observe(el);
+            });
+            
+            fetchStats(); 
+            loadAndRenderData();
+        });
+
+        function getCategoryBadge(type) {
+            if (!type) return "UNKNOWN";
+            let t = type.toLowerCase();
+            if (t.includes("water") || t.includes("flood")) return `<span class="bg-blue-100 text-blue-800 border-2 border-blue-800 px-2 py-1 text-xs uppercase font-bold whitespace-nowrap">${type}</span>`;
+            if (t.includes("fall") || t.includes("medical")) return `<span class="bg-red-100 text-red-800 border-2 border-red-800 px-2 py-1 text-xs uppercase font-bold whitespace-nowrap">${type}</span>`;
+            if (t.includes("harassment") || t.includes("assault") || t.includes("threat") || t.includes("altercation")) return `<span class="bg-purple-100 text-purple-800 border-2 border-purple-800 px-2 py-1 text-xs uppercase font-bold whitespace-nowrap">${type}</span>`;
+            if (t.includes("tree")) return `<span class="bg-orange-100 text-orange-800 border-2 border-orange-800 px-2 py-1 text-xs uppercase font-bold whitespace-nowrap">${type}</span>`;
+            return `<span class="bg-gray-200 text-gray-800 border-2 border-gray-800 px-2 py-1 text-xs uppercase font-bold whitespace-nowrap">${type}</span>`;
+        }
+
+        async function handleRefresh(btn = null) {
+            if(btn) {
+                const icon = btn.querySelector('.material-symbols-outlined');
+                if(icon) icon.classList.add('animate-spin');
+            }
+            try { 
+                connectLiveFeed();
+                await fetchStats(); 
+                await loadAndRenderData();
+            } catch (err) {
+                console.error("Error refreshing", err);
+            } finally {
+                if(btn) {
+                    const icon = btn.querySelector('.material-symbols-outlined');
+                    if(icon) icon.classList.remove('animate-spin');
+                }
+            }
+        }
+
+        async function fetchStats() {
+            try {
+                const res = await fetch(API_BASE + "/stats"); 
+                const data = await res.json();
+                
+                document.getElementById('stat-pending').innerText = data.pending_reviews;
+                document.getElementById('stat-solved').innerText = data.cases_solved;
+                document.getElementById('stat-cctv').innerText = data.active_cctv_nodes;
+
+                const navBadge = document.getElementById('nav-alert-badge');
+                if (data.pending_reviews > 0) {
+                    navBadge.innerText = data.pending_reviews;
+                    navBadge.classList.remove('hidden');
+                } else {
+                    navBadge.classList.add('hidden');
+                }
+
+                if (previousPendingCount !== -1 && data.pending_reviews > previousPendingCount) {
+                    playSynthesizedBeep(950, 0.4);
+                    const overlay = document.getElementById('incoming-alert-overlay');
+                    overlay.classList.remove('hidden');
+                    
+                    setTimeout(() => { 
+                        overlay.classList.add('hidden'); 
+                    }, 3500);
+                }
+                previousPendingCount = data.pending_reviews;
+            } catch (err) {}
+        }
+
+        async function loadIncidents() {
+            try { const res = await fetch(API_BASE + "/incidents"); window.allIncidents = await res.json(); } catch (err) {}
+        }
+        async function loadReports() {
+            try { const res = await fetch(API_BASE + "/reports"); window.allReports = await res.json(); } catch (err) {}
+        }
+        let lastRenderedSignature = "";
+        async function loadAndRenderData() {
+            // Fetching both lists in parallel and rendering exactly ONCE (instead
+            // of once per fetch) was the main cause of the dashboard lag - it was
+            // doing a full table rebuild twice on every single poll.
+            await Promise.all([loadIncidents(), loadReports()]);
+            const signature = JSON.stringify(window.allIncidents) + "|" + JSON.stringify(window.allReports) + "|" + activeFilter;
+            if (signature === lastRenderedSignature) return; // nothing actually changed - skip the DOM rebuild
+            lastRenderedSignature = signature;
+            renderAllData();
+        }
+
+        function setFilter(level) {
+            activeFilter = level;
+            const btns = ['ALL', 'CRITICAL', 'URGENT', 'REVIEW'];
+            btns.forEach(b => {
+                const el = document.getElementById('btn-flt-' + b);
+                if (b === level) { el.className = "flex-1 md:flex-none bg-black text-white px-4 py-2 border-2 border-black font-black uppercase text-xs md:text-sm transition-colors"; } 
+                else { el.className = "flex-1 md:flex-none bg-white text-black px-4 py-2 border-2 border-black font-black uppercase text-xs md:text-sm hover:bg-brand-yellow transition-colors"; }
+            });
+            renderAllData();
+        }
+
+        function renderAllData() {
+            const activeIncidentsBody = document.getElementById('incidents-table-body'); 
+            const activeReportsBody = document.getElementById('reports-table-body');
+            const resolvedBody = document.getElementById('resolved-incidents-body');
+            
+            if (activeIncidentsBody) activeIncidentsBody.innerHTML = ''; 
+            if (activeReportsBody) activeReportsBody.innerHTML = ''; 
+            if (resolvedBody) resolvedBody.innerHTML = '';
+            
+            const combinedData = [...window.allIncidents, ...window.allReports].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+            combinedData.forEach(item => {
+                const isReport = item.concern_type !== undefined;
+                const scoreStr = isReport ? item.severity : item.risk_score;
+                const isResolvedOrDeclined = item.status.toLowerCase().includes('resolve') || item.status.toLowerCase().includes('decline');
+                
+                if (activeFilter !== 'ALL') {
+                    const sLower = String(scoreStr).toLowerCase();
+                    if (activeFilter === 'CRITICAL' && !sLower.includes('high') && !sLower.includes('critical') && !(parseInt(scoreStr) >= 80)) return;
+                    if (activeFilter === 'URGENT' && !sLower.includes('medium') && !sLower.includes('urgent') && !(parseInt(scoreStr) >= 50 && parseInt(scoreStr) < 80)) return;
+                    if (activeFilter === 'REVIEW' && !sLower.includes('low') && !sLower.includes('review') && !(parseInt(scoreStr) < 50)) return;
+                }
+
+                const badge = getCategoryBadge(isReport ? item.concern_type : item.event_type);
+                const score = isReport ? item.severity : item.risk_score + " Confidence";
+                const collectionStr = isReport ? 'reports' : 'incidents';
+                const loc = isReport ? item.landmark : item.location;
+                
+                let statusHtml = `<span class="text-gray-500 font-bold uppercase whitespace-nowrap">${item.status}</span>`;
+                if (item.status.includes('DISPATCHED') || item.status.includes('RE-ROUTED')) {
+                    statusHtml = `<span class="text-brand-cyan font-black uppercase animate-pulse whitespace-nowrap">${item.status}</span>`;
+                }
+                
+                if (item.auto_routed && !isResolvedOrDeclined) {
+                    statusHtml = `<span class="bg-brand-cyan text-black px-2 py-1 text-xs mr-2 font-black">⚡ AUTO-ROUTED</span><br/>` + statusHtml;
+                }
+
+                let actionBtn = `<button onclick="openVerifyModal('${item.id}', '${collectionStr}')" class="bg-brand-yellow px-4 py-2 border-2 border-black text-xs font-black hover:bg-black hover:text-white uppercase transition-colors flex items-center justify-center gap-1 w-full"><span class="material-symbols-outlined text-[14px]">policy</span> VERIFY</button>`;
+                
+                if (item.status.includes('DISPATCHED') || item.status.includes('RE-ROUTED')) {
+                    actionBtn = `<button onclick="openVerifyModal('${item.id}', '${collectionStr}')" class="bg-brand-cyan px-4 py-2 border-2 border-black text-xs font-black hover:bg-black hover:text-white uppercase transition-colors flex items-center justify-center gap-1 w-full"><span class="material-symbols-outlined text-[14px]">visibility</span> VIEW</button>`;
+                }
+
+                if (!isResolvedOrDeclined) {
+                    const tr = document.createElement('tr'); 
+                    tr.className = "border-b-2 border-black font-bold text-sm hover:bg-gray-100 transition-colors";
+                    
+                    if (!isReport) {
+                        tr.innerHTML = `<td class="p-3 border-2 border-black">${badge}</td><td class="p-3 border-2 border-black text-brand-red font-black whitespace-nowrap">${score}</td><td class="p-3 border-2 border-black min-w-[200px]">${loc}</td><td class="p-3 border-2 border-black">${statusHtml}</td><td class="p-3 border-2 border-black">${actionBtn}</td>`;
+                        if (activeIncidentsBody) activeIncidentsBody.appendChild(tr);
+                    } else {
+                        tr.innerHTML = `<td class="p-3 border-2 border-black">${badge}</td><td class="p-3 border-2 border-black text-brand-red font-black whitespace-nowrap">${item.severity}</td><td class="p-3 border-2 border-black min-w-[200px]">${loc}</td><td class="p-3 border-2 border-black">${statusHtml}</td><td class="p-3 border-2 border-black">${actionBtn}</td>`;
+                        if (activeReportsBody) activeReportsBody.appendChild(tr);
+                    }
+                } else {
+                    if (item.status.toLowerCase().includes('resolve')) statusHtml = `<span class="text-green-600 font-black uppercase whitespace-nowrap">${item.status}</span>`;
+                    if (item.status.toLowerCase().includes('decline')) statusHtml = `<span class="text-brand-red font-black uppercase whitespace-nowrap">${item.status}</span>`;
+
+                    const tr = document.createElement('tr'); 
+                    tr.className = "border-b-2 border-black font-bold text-sm hover:bg-gray-100 transition-colors opacity-80";
+                    tr.innerHTML = `<td class="p-3 border-2 border-black">${badge}</td><td class="p-3 border-2 border-black font-black whitespace-nowrap">${score}</td><td class="p-3 border-2 border-black min-w-[200px]">${loc}</td><td class="p-3 border-2 border-black">${statusHtml}</td><td class="p-3 border-2 border-black"><button onclick="openVerifyModal('${item.id}', '${collectionStr}')" class="bg-gray-800 text-white px-4 py-2 border-2 border-black text-xs font-black hover:bg-brand-yellow hover:text-black uppercase flex items-center justify-center gap-1 w-full"><span class="material-symbols-outlined text-[14px]">folder_open</span> DOSSIER</button></td>`;
+                                   
+                    if (resolvedBody) resolvedBody.appendChild(tr);
+                }
+            });
+        }
+
+        function openVerifyModal(reportId, collectionType) {
+            currentModalReportId = reportId; 
+            currentModalCollection = collectionType;
+            
+            let report = null;
+            if (collectionType === 'reports') {
+                report = window.allReports.find(r => r.id == reportId || r._id == reportId);
+            } else {
+                report = window.allIncidents.find(r => r.id == reportId || r._id == reportId);
+            }
+            
+            if (!report) return;
+
+            document.getElementById('v-concern').innerHTML = getCategoryBadge(report.concern_type || report.event_type);
+            document.getElementById('v-severity').innerText = report.severity || (report.risk_score + " Confidence");
+            document.getElementById('v-address').innerText = report.landmark || report.location;
+            document.getElementById('v-details').innerText = report.details || "AI Automated Event Log. Review attached evidence.";
+
+            const mediaContainer = document.getElementById('v-media-container'); 
+            const vidEl = document.getElementById('v-video'); 
+            const imgEl = document.getElementById('v-image'); 
+            const snapsContainer = document.getElementById('v-snapshots-container');
+            
+            vidEl.classList.add('hidden'); 
+            imgEl.classList.add('hidden'); 
+            snapsContainer.classList.add('hidden');
+            snapsContainer.innerHTML = '';
+            vidEl.pause();
+
+            let hasMedia = false;
+
+            if (report.media_url) {
+                hasMedia = true;
+                mediaContainer.classList.remove('hidden');
+                if (report.media_url.endsWith('.mp4') || report.media_url.endsWith('.webm') || report.media_url.startsWith('data:video')) {
+                    vidEl.src = report.media_url; 
+                    vidEl.classList.remove('hidden'); 
+                    vidEl.play().catch(e => console.log("Auto-play blocked"));
+                } else {
+                    imgEl.src = report.media_url; 
+                    imgEl.classList.remove('hidden');
+                }
+            }
+
+            if (report.snapshots && report.snapshots.length > 0) {
+                hasMedia = true;
+                mediaContainer.classList.remove('hidden');
+                snapsContainer.classList.remove('hidden');
+                
+                report.snapshots.forEach(url => {
+                    if (url) {
+                        const snapImg = document.createElement('img'); 
+                        snapImg.src = url;
+                        snapImg.className = "border-2 border-black h-24 w-full object-cover shadow-brutal-sm cursor-pointer hover:opacity-80";
+                        snapImg.onclick = () => {
+                            const w = window.open("");
+                            w.document.body.style.margin = "0";
+                            w.document.body.style.backgroundColor = "#000";
+                            w.document.body.style.display = "flex";
+                            w.document.body.style.justifyContent = "center";
+                            w.document.body.style.alignItems = "center";
+                            const fullImg = w.document.createElement("img");
+                            fullImg.src = url;
+                            fullImg.style.maxWidth = "100%";
+                            fullImg.style.maxHeight = "100vh";
+                            w.document.body.appendChild(fullImg);
+                        };
+                        snapsContainer.appendChild(snapImg);
+                    }
+                });
+            }
+
+            if (!hasMedia) {
+                mediaContainer.classList.add('hidden');
+            }
+
+            document.getElementById('verify-modal').classList.remove('hidden');
+            
+            const mapDiv = document.getElementById('verify-map');
+            const mapNoGps = document.getElementById('verify-map-nogps');
+            
+            if (report.lat && report.lng) {
+                mapDiv.classList.remove('hidden');
+                mapNoGps.classList.add('hidden');
+                setTimeout(() => {
+                    if (!verifyMapInstance) {
+                        verifyMapInstance = L.map('verify-map').setView([report.lat, report.lng], 16);
+                        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(verifyMapInstance);
+                        verifyMapMarker = L.marker([report.lat, report.lng]).addTo(verifyMapInstance);
+                    } else {
+                        verifyMapInstance.setView([report.lat, report.lng], 16); 
+                        verifyMapMarker.setLatLng([report.lat, report.lng]); 
+                        verifyMapInstance.invalidateSize(); 
+                    }
+                }, 100);
+            } else {
+                mapDiv.classList.add('hidden');
+                mapNoGps.classList.remove('hidden');
+            }
+            
+            document.getElementById('v-resolve-btn').onclick = () => updateStatus(currentModalCollection, currentModalReportId, 'Resolved');
+            document.getElementById('v-decline-btn').onclick = () => updateStatus(currentModalCollection, currentModalReportId, 'Declined');
+        }
+
+        function closeVerifyModal() { 
+            document.getElementById('verify-modal').classList.add('hidden'); 
+            document.getElementById('v-video').pause();
+        }
+
+        async function dispatchTeam(department) {
+            if (!currentModalReportId || !currentModalCollection) return;
+            
+            try {
+                await fetch(API_BASE + "/dispatch/" + currentModalReportId, {
+                    method: 'PATCH', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify({ department: department, collection: currentModalCollection })
+                });
+                
+                await handleRefresh(); 
+                closeVerifyModal();
+            } catch (err) { 
+                alert("Failed to connect to backend dispatch engine."); 
+            }
+        }
+
+        function accessCCTV() {
+            closeVerifyModal(); 
+            document.getElementById('monitoring-section').scrollIntoView({ behavior: 'smooth' });
+            
+            const label = document.getElementById('cctv-label');
+            const status = document.getElementById('cctv-status');
+            const pulse = document.getElementById('cctv-pulse');
+            
+            label.innerText = "TRIANGULATING NEAREST CAMERA..."; 
+            label.classList.add("text-brand-red"); 
+            label.classList.remove("text-brand-yellow"); 
+            pulse.classList.replace("bg-brand-red", "bg-brand-yellow");
+            
+            setTimeout(() => {
+                label.innerText = "LIVE: CAM-HQ-00 [Central Police Headquarters] - DISTANCE: 0m";
+                label.classList.replace("text-brand-red", "text-brand-cyan"); 
+                status.innerText = "STATUS: CCTV SYNC ENGAGED"; 
+                status.classList.add("text-brand-cyan"); 
+                pulse.classList.replace("bg-brand-yellow", "bg-brand-cyan");
+            }, 1200);
+        }
+
+        async function updateStatus(type, id, status) {
+            try { 
+                await fetch(API_BASE + "/" + type + "/" + id + "/status", { 
+                    method: 'PATCH', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify({ status: status }) 
+                }); 
+                await handleRefresh(); 
+            } catch (err) {
+                console.error("Status update error", err);
+            }
+            closeVerifyModal();
+        }
+
+        setInterval(() => { 
+            fetchStats(); 
+            loadAndRenderData();
+        }, 4000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pymongo
+opencv-python-headless
+numpy
+pillow
+ultralytics
+python-multipart
+supabase
+python-dotenv

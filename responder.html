@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>JAN SURAKSHA | Mobile Responder Terminal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;900&family=Geist:wght@500;700;900&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    
+    <script>
+      tailwind.config = { theme: { extend: { colors: { "brand-yellow": "#FFCC00", "brand-red": "#FF3333", "brand-cyan": "#00E5FF", }, fontFamily: { "sans": ["Manrope", "sans-serif"], "mono": ["Geist", "monospace"], }, boxShadow: { "brutal": "6px 6px 0px 0px rgba(255,255,255,1)", "brutal-sm": "3px 3px 0px 0px rgba(255,255,255,1)", } } } }
+    </script>
+    <style>body { background-color: #0f172a; background-image: linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px); background-size: 30px 30px; color: #fff; overflow-x: hidden; scroll-behavior: smooth; } .alert-flash { animation: flashRed 0.6s infinite alternate; } @keyframes flashRed { from { background-color: #0f172a; } to { background-color: #6a0000; } }</style>
+</head>
+<body class="antialiased font-sans flex flex-col min-h-screen" id="bg-container">
+
+    <div id="evidence-modal" class="hidden fixed inset-0 z-[300] bg-black/95 p-4 flex flex-col items-center justify-center overflow-y-auto">
+        <button onclick="closeEvidenceModal()" class="absolute top-6 right-6 text-white text-5xl hover:text-brand-red transition-colors">&times;</button>
+        <div class="border-4 border-white p-2 shadow-brutal bg-black max-w-5xl w-full my-auto">
+            <h3 class="bg-white text-black font-black uppercase tracking-widest text-xs p-2 mb-2">RESTRICTED DOSSIER EVIDENCE</h3>
+            
+            <video id="evidence-vid" controls autoplay loop class="max-h-[50vh] w-full object-contain hidden border-2 border-gray-600 mb-2"></video>
+            <img id="evidence-img" class="max-h-[50vh] w-full object-contain hidden border-2 border-gray-600 mb-2" />
+            
+            <!-- Snapshot Grid for responders -->
+            <div id="evidence-snapshots-container" class="grid grid-cols-3 gap-2 w-full hidden"></div>
+        </div>
+    </div>
+
+    <div id="resolve-modal" class="hidden fixed inset-0 z-[200] bg-black/90 p-4 flex flex-col items-center justify-center">
+        <div class="bg-brand-yellow p-4 md:p-8 border-4 border-black max-w-lg w-full shadow-brutal relative text-black">
+            <button onclick="document.getElementById('resolve-modal').classList.add('hidden')" class="absolute top-2 md:top-4 right-4 text-black text-4xl md:text-5xl hover:text-brand-red">&times;</button>
+            <h2 class="text-3xl md:text-5xl font-black uppercase tracking-tighter mb-4 leading-none mt-4 md:mt-0">Close<br>Case</h2>
+            <p class="font-bold mb-6 text-sm md:text-lg">Upload ground truth resolution photo to close this incident and notify Command Center.</p>
+            
+            <input type="file" id="resolve-photo" accept="image/*" capture="environment" class="hidden">
+            <label for="resolve-photo" class="block w-full border-4 border-dashed border-black bg-white p-6 md:p-8 text-center cursor-pointer mb-6 hover:bg-gray-100 transition-colors">
+                <span class="material-symbols-outlined text-[48px] md:text-[64px] block mb-2">add_a_photo</span>
+                <span id="resolve-photo-label" class="font-black text-lg md:text-xl uppercase tracking-widest">TAP TO SNAP PHOTO</span>
+            </label>
+            
+            <button id="submit-resolve-btn" onclick="submitResolution()" class="w-full bg-black text-white font-black text-xl md:text-2xl py-4 md:py-6 border-4 border-black hover:bg-brand-cyan hover:text-black transition-colors uppercase tracking-widest shadow-brutal-sm flex items-center justify-center gap-2">
+                <span id="resolve-btn-text">Upload & Resolve</span>
+            </button>
+        </div>
+    </div>
+
+    <header id="top-header" class="bg-black border-b-4 border-white p-4 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center justify-between w-full md:w-auto">
+                <div class="flex items-center gap-3">
+                    <span id="unit-badge" class="bg-blue-600 text-white p-2 border-2 border-white font-mono font-black text-xs md:text-sm">UNIT-07</span>
+                    <h1 class="font-black text-xl md:text-3xl uppercase tracking-wider text-white" id="header-title">RESPONDER <span class="text-gray-400 hidden sm:inline">TERMINAL</span></h1>
+                </div>
+            </div>
+            <div class="flex items-center gap-3 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
+                <button onclick="requestPushNotifications()" id="notify-btn" class="flex-1 md:flex-none bg-yellow-500 text-black px-3 py-2 font-black uppercase text-xs border-2 border-white hover:bg-white transition-colors flex items-center justify-center gap-1 whitespace-nowrap">
+                    <span class="material-symbols-outlined text-[16px]">notifications</span> Alerts
+                </button>
+                <button onclick="manualSync()" class="flex-1 md:flex-none bg-brand-cyan text-black px-3 py-2 font-black uppercase text-xs border-2 border-white hover:bg-white transition-colors flex items-center justify-center gap-1 whitespace-nowrap">
+                    <span id="sync-btn-icon" class="material-symbols-outlined text-[16px]">sync</span> FORCE SYNC
+                </button>
+                <a href="index.html" class="flex-1 md:flex-none text-center bg-brand-red text-white px-3 py-2 font-black uppercase text-xs border-2 border-white hover:bg-white hover:text-black transition-colors">Logout</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-5xl w-full mx-auto p-4 md:p-6 mt-2">
+        <div id="tactical-banner" class="bg-blue-900 border-4 border-white p-4 md:p-6 shadow-brutal mb-6 md:mb-8 flex justify-between items-center">
+            <div>
+                <h2 class="font-black text-2xl md:text-4xl uppercase" id="jurisdiction-title">JURISDICTION: PIN 208016</h2>
+                <p class="font-mono text-xs md:text-lg mt-1 text-white opacity-80" id="listening-text">AWAITING COMMAND DISPATCHES...</p>
+            </div>
+            <span id="tactical-icon" class="material-symbols-outlined text-[48px] md:text-[64px] text-white opacity-50 hidden sm:block">local_police</span>
+        </div>
+
+        <div class="flex justify-between items-end mb-4 border-b-2 border-gray-600 pb-2">
+            <h3 class="font-black uppercase text-xl md:text-2xl text-brand-yellow" id="queue-title">Active Queue</h3>
+            <button onclick="clearAlarms()" class="bg-white text-black font-black uppercase text-xs px-3 py-2 hover:bg-brand-red hover:text-white transition-colors border-2 border-black">Silence Alarms</button>
+        </div>
+
+        <div id="dispatch-feed" class="space-y-6 md:space-y-8">
+            <div class="text-center text-gray-500 font-mono text-lg md:text-2xl mt-16" id="empty-state">
+                <span id="empty-state-text">[ NO ACTIVE DISPATCHES IN SECTOR ]</span>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const BACKEND_ORIGIN = "https://jan-suraksha.onrender.com";
+        const API_BASE = BACKEND_ORIGIN + "/api";
+        const sirenAudio = new Audio("https://actions.google.com/sounds/v1/alarms/warning_siren.ogg");
+        sirenAudio.loop = true; sirenAudio.volume = 1.0; 
+
+        const feedContainer = document.getElementById('dispatch-feed');
+        const emptyState = document.getElementById('empty-state');
+        const emptyStateText = document.getElementById('empty-state-text');
+        const bgContainer = document.getElementById('bg-container');
+        const currentSquad = localStorage.getItem('js_responder_dept') || "POLICE";
+        
+        const squadConfig = {
+            "POLICE": { bg: "bg-blue-900", border: "border-blue-500", icon: "local_police", text: "text-blue-400", badge: "bg-blue-600" },
+            "EMS": { bg: "bg-red-900", border: "border-red-500", icon: "ambulance", text: "text-red-400", badge: "bg-red-600" },
+            "CIVIC": { bg: "bg-orange-900", border: "border-orange-500", icon: "construction", text: "text-orange-400", badge: "bg-orange-600" }
+        };
+        const theme = squadConfig[currentSquad] || squadConfig["POLICE"];
+
+        document.getElementById('header-title').innerHTML = `${currentSquad} <span class="${theme.text} hidden sm:inline">TERMINAL</span>`;
+        document.getElementById('unit-badge').className = `${theme.badge} text-white p-1 md:p-2 border-2 border-white font-mono font-black text-xs md:text-sm`;
+        document.getElementById('tactical-banner').className = `${theme.bg} border-4 border-white p-4 md:p-6 shadow-brutal mb-6 md:mb-8 flex justify-between items-center`;
+        document.getElementById('tactical-icon').innerText = theme.icon;
+        document.getElementById('queue-title').innerText = `ACTIVE ${currentSquad} QUEUE`;
+        emptyStateText.innerText = `[ NO ACTIVE ${currentSquad} DISPATCHES ]`;
+
+        let activeMissionIds = new Set();
+        let localMissionCache = {}; 
+        let knownIncidentIds = new Set();
+
+        function requestPushNotifications() {
+            if ("Notification" in window) {
+                Notification.requestPermission().then(permission => {
+                    if (permission === "granted") {
+                        const notifyBtn = document.getElementById('notify-btn');
+                        notifyBtn.innerHTML = '<span class="material-symbols-outlined text-[18px]">notifications_active</span> Alerts On';
+                        notifyBtn.classList.replace('bg-yellow-500', 'bg-green-500');
+                    }
+                });
+            }
+        }
+
+        async function syncDatabaseMissions() {
+            try {
+                const [incRes, repRes] = await Promise.all([fetch(`${API_BASE}/incidents`), fetch(`${API_BASE}/reports`)]);
+                const allData = [...await incRes.json(), ...await repRes.json()].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                let found = false;
+                allData.forEach(item => {
+                    const requiredTag = `DISPATCHED (${currentSquad})`;
+                    if (item.status && item.status.includes(requiredTag)) {
+                        found = true;
+                        if (!activeMissionIds.has(item.id)) {
+                            activeMissionIds.add(item.id);
+                            localMissionCache[item.id] = item; 
+                            renderMissionCard(item);
+                        }
+                    }
+                });
+                if(!found && activeMissionIds.size === 0) emptyState.style.display = 'block';
+            } catch (e) { console.error("Local sync failed", e); }
+        }
+
+        function manualSync() {
+            const btnIcon = document.getElementById('sync-btn-icon');
+            btnIcon.classList.add('animate-spin');
+            syncDatabaseMissions().finally(() => { setTimeout(() => { btnIcon.classList.remove('animate-spin'); }, 800); });
+        }
+
+        function renderMissionCard(item) {
+            emptyState.style.display = 'none';
+
+            const title = item.event_type || item.concern_type || "URGENT INCIDENT";
+            const location = item.location || item.landmark || "Unknown Coordinates";
+            const details = item.details || "AI Automation Triggered. Review Attached Evidence.";
+            const severityStr = String(item.risk_score || item.severity || "MEDIUM").toUpperCase();
+            const time = new Date().toLocaleTimeString();
+            const collectionType = item.concern_type ? 'reports' : 'incidents';
+            
+            const message = `LOC: ${location}\nDETAILS: ${details}`;
+            const isCriticalOrUrgent = severityStr.includes("CRITICAL") || severityStr.includes("HIGH") || severityStr.includes("URGENT") || severityStr.includes("9");
+
+            if (!knownIncidentIds.has(item.id)) {
+                knownIncidentIds.add(item.id);
+                if ("Notification" in window && Notification.permission === "granted") {
+                    new Notification("🚨 NEW DISPATCH: " + currentSquad, { body: title + " at " + location });
+                }
+            }
+
+            const card = document.createElement('div');
+            card.id = `mission-card-${item.id}`;
+            const borderColor = isCriticalOrUrgent ? "border-brand-red" : "border-brand-yellow";
+            const badgeColor = isCriticalOrUrgent ? "bg-brand-red text-white" : "bg-brand-yellow text-black";
+            const badgeText = isCriticalOrUrgent ? "HIGH PRIORITY" : "REVIEW NEEDED";
+            const animClass = isCriticalOrUrgent ? "animate-bounce" : "";
+            
+            card.className = `bg-black border-4 ${borderColor} p-4 md:p-8 shadow-brutal ${animClass}`;
+            card.innerHTML = `
+                <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 md:mb-6 border-b-2 border-gray-700 pb-4">
+                    <div>
+                        <span class="${badgeColor} font-black uppercase text-xs md:text-lg px-2 py-1 md:px-3 md:py-1 mb-2 md:mb-3 inline-block tracking-widest">${badgeText}</span>
+                        <h3 class="font-black text-2xl md:text-5xl uppercase text-white tracking-tighter leading-none">${title}</h3>
+                    </div>
+                    <span class="font-mono text-brand-cyan font-bold text-sm md:text-2xl mt-2 lg:mt-0">${time}</span>
+                </div>
+                <p class="font-bold text-sm md:text-2xl text-brand-yellow mb-6 md:mb-8 font-mono whitespace-pre-wrap leading-relaxed">${message}</p>
+                <div class="flex flex-col sm:flex-row gap-2 md:gap-4">
+                    <button id="accept-btn-${item.id}" onclick="acceptMission(this, '${item.id}')" class="flex-1 bg-white text-black font-black text-sm md:text-xl uppercase tracking-widest px-4 py-4 md:px-8 md:py-6 border-2 border-white hover:bg-green-500 hover:text-white transition-colors">Accept & En Route</button>
+                    <button id="resolve-btn-${item.id}" onclick="openResolveModal('${item.id}', '${collectionType}')" class="hidden flex-1 bg-brand-cyan text-black font-black text-sm md:text-xl uppercase tracking-widest px-4 py-4 md:px-8 md:py-6 border-2 border-brand-cyan hover:bg-black hover:text-white transition-colors flex items-center justify-center gap-2"><span class="material-symbols-outlined text-2xl md:text-4xl">add_a_photo</span> RESOLVE CASE</button>
+                    <button onclick="openEvidenceModal('${item.id}')" class="flex-1 bg-black text-white font-black text-sm md:text-xl uppercase tracking-widest px-4 py-4 md:px-8 md:py-6 border-2 border-white hover:bg-brand-yellow hover:text-black transition-colors flex items-center justify-center gap-2"><span class="material-symbols-outlined text-2xl md:text-4xl">videocam</span> View Evidence</button>
+                </div>
+            `;
+            
+            feedContainer.prepend(card);
+            if (isCriticalOrUrgent) { triggerAlarm(); setTimeout(() => { card.classList.remove('animate-bounce'); }, 3000); }
+        }
+
+        function openEvidenceModal(id) {
+            const item = localMissionCache[id];
+            if(!item || (!item.media_url && (!item.snapshots || item.snapshots.length === 0))) { 
+                alert("Command Center did not attach evidence media."); 
+                return; 
+            }
+            
+            const mod = document.getElementById('evidence-modal');
+            const img = document.getElementById('evidence-img');
+            const vid = document.getElementById('evidence-vid');
+            const snapsContainer = document.getElementById('evidence-snapshots-container');
+            
+            img.classList.add('hidden'); 
+            vid.classList.add('hidden'); 
+            snapsContainer.classList.add('hidden');
+            snapsContainer.innerHTML = '';
+            vid.pause();
+
+            if (item.media_url) {
+                if (item.media_url.endsWith('.mp4') || item.media_url.endsWith('.webm') || item.media_url.startsWith('data:video')) {
+                    vid.src = item.media_url; 
+                    vid.classList.remove('hidden'); 
+                    vid.play().catch(e => console.log("Auto-play blocked"));
+                } else {
+                    img.src = item.media_url; 
+                    img.classList.remove('hidden');
+                }
+            }
+            
+            if (item.snapshots && item.snapshots.length > 0) {
+                snapsContainer.classList.remove('hidden');
+                item.snapshots.forEach(url => {
+                    if (url) {
+                        const snapImg = document.createElement('img'); 
+                        snapImg.src = url;
+                        snapImg.className = "border-2 border-white h-20 w-full object-cover shadow-brutal-sm cursor-pointer";
+                        snapImg.onclick = () => {
+                            const w = window.open("");
+                            w.document.body.style.margin = "0";
+                            w.document.body.style.backgroundColor = "#000";
+                            w.document.body.style.display = "flex";
+                            w.document.body.style.justifyContent = "center";
+                            w.document.body.style.alignItems = "center";
+                            const fullImg = w.document.createElement("img");
+                            fullImg.src = url;
+                            fullImg.style.maxWidth = "100%";
+                            fullImg.style.maxHeight = "100vh";
+                            w.document.body.appendChild(fullImg);
+                        };
+                        snapsContainer.appendChild(snapImg);
+                    }
+                });
+            }
+
+            mod.classList.remove('hidden');
+        }
+
+        function closeEvidenceModal() {
+            document.getElementById('evidence-modal').classList.add('hidden');
+            document.getElementById('evidence-vid').pause(); 
+            document.getElementById('evidence-vid').src = "";
+        }
+
+        let activeResolveId = null, activeResolveCollection = null;
+
+        function openResolveModal(id, collectionType) {
+            activeResolveId = id; activeResolveCollection = collectionType;
+            document.getElementById('resolve-photo-label').innerText = 'TAP TO SNAP PHOTO';
+            document.getElementById('resolve-photo').value = '';
+            document.getElementById('resolve-modal').classList.remove('hidden');
+        }
+
+        document.getElementById('resolve-photo').addEventListener('change', function(e) {
+            if(e.target.files[0]) document.getElementById('resolve-photo-label').innerText = 'EVIDENCE CAPTURED - READY';
+        });
+
+        async function submitResolution() {
+            const fileInput = document.getElementById('resolve-photo');
+            if(fileInput.files.length === 0) { alert("Please capture a ground-truth photo to prove the area is secure."); return; }
+
+            const btnText = document.getElementById('resolve-btn-text');
+            const originalText = btnText.innerText;
+            btnText.innerText = "UPLOADING...";
+
+            const reader = new FileReader();
+            reader.onload = async function(event) {
+                try {
+                    await fetch(`${API_BASE}/${activeResolveCollection}/${activeResolveId}/status`, {
+                        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ status: "Resolved On-Site", resolution_media: event.target.result })
+                    });
+                    
+                    document.getElementById('resolve-modal').classList.add('hidden');
+                    const card = document.getElementById(`mission-card-${activeResolveId}`);
+                    if(card) card.remove();
+                    
+                    activeMissionIds.delete(activeResolveId);
+                    delete localMissionCache[activeResolveId];
+                    if(activeMissionIds.size === 0) emptyState.style.display = 'block';
+
+                } catch(err) { alert("Failed to sync resolution with backend database."); } 
+                finally { btnText.innerText = originalText; }
+            };
+            reader.readAsDataURL(fileInput.files[0]);
+        }
+
+        function acceptMission(btnElement, id) {
+            clearAlarms();
+            const card = document.getElementById(`mission-card-${id}`);
+            card.classList.replace('border-brand-red', 'border-gray-500');
+            card.classList.replace('border-brand-yellow', 'border-gray-500');
+            btnElement.classList.add('hidden');
+            document.getElementById(`resolve-btn-${id}`).classList.remove('hidden');
+        }
+
+        function triggerAlarm() { bgContainer.classList.add('alert-flash'); sirenAudio.play().catch(e => console.log("Click page to enable audio.")); }
+        function clearAlarms() { bgContainer.classList.remove('alert-flash'); sirenAudio.pause(); sirenAudio.currentTime = 0; }
+
+        document.body.addEventListener('click', () => { sirenAudio.load(); }, { once: true });
+        setInterval(syncDatabaseMissions, 3000);
+        syncDatabaseMissions();
+    </script>
+</body>
+</html>
