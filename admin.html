@@ -413,10 +413,12 @@
             }
         }
 
-        // Fetch metrics and hardware telemetry
+        // Fetch metrics and hardware telemetry (UPDATED WITH NGROK HEADER)
         async function fetchStats() {
             try {
-                const res = await fetch(API_BASE + "/stats"); 
+                const res = await fetch(API_BASE + "/stats", {
+                    headers: { "ngrok-skip-browser-warning": "69420" }
+                }); 
                 const data = await res.json();
                 
                 document.getElementById('stat-pending').innerText = data.pending_reviews;
@@ -480,11 +482,24 @@
             }
         }
 
+        // (UPDATED WITH NGROK HEADER)
         async function loadIncidents() {
-            try { const res = await fetch(API_BASE + "/incidents"); window.allIncidents = await res.json(); } catch (err) {}
+            try { 
+                const res = await fetch(API_BASE + "/incidents", {
+                    headers: { "ngrok-skip-browser-warning": "69420" }
+                }); 
+                window.allIncidents = await res.json(); 
+            } catch (err) {}
         }
+        
+        // (UPDATED WITH NGROK HEADER)
         async function loadReports() {
-            try { const res = await fetch(API_BASE + "/reports"); window.allReports = await res.json(); } catch (err) {}
+            try { 
+                const res = await fetch(API_BASE + "/reports", {
+                    headers: { "ngrok-skip-browser-warning": "69420" }
+                }); 
+                window.allReports = await res.json(); 
+            } catch (err) {}
         }
 
         let lastRenderedSignature = "";
@@ -683,13 +698,17 @@
             document.getElementById('v-video').pause();
         }
 
+        // (UPDATED WITH NGROK HEADER)
         async function dispatchTeam(department) {
             if (!currentModalReportId || !currentModalCollection) return;
             
             try {
                 await fetch(API_BASE + "/dispatch/" + currentModalReportId, {
                     method: 'PATCH', 
-                    headers: { 'Content-Type': 'application/json' }, 
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'ngrok-skip-browser-warning': '69420'
+                    }, 
                     body: JSON.stringify({ department: department, collection: currentModalCollection })
                 });
                 
@@ -722,11 +741,15 @@
             }, 1200);
         }
 
+        // (UPDATED WITH NGROK HEADER)
         async function updateStatus(type, id, status) {
             try { 
                 await fetch(API_BASE + "/" + type + "/" + id + "/status", { 
                     method: 'PATCH', 
-                    headers: { 'Content-Type': 'application/json' }, 
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'ngrok-skip-browser-warning': '69420'
+                    }, 
                     body: JSON.stringify({ status: status }) 
                 }); 
                 await handleRefresh(); 

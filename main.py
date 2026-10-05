@@ -429,8 +429,7 @@ def submit_report(report: CitizenReport):
         dup = find_nearby_duplicate(report.lat, report.lng, report.concern_type, max_meters=50.0)
         if dup:
             patch = {"citizen_upvotes": (dup.get("citizen_upvotes") or 1) + 1}
-            if report.media_url:
-                patch["supplementary_evidence"] = (dup.get("supplementary_evidence") or []) + [report.media_url]
+            
             supabase.table("reports").update(patch).eq("id", dup["id"]).execute()
             return {"success": True, "ref": f"JS-{str(dup['id'])[-4:]}", "merged": True, "message": "Incident merged."}
 
@@ -467,13 +466,13 @@ def submit_report(report: CitizenReport):
     initial_status = "Pending Review" if is_valid else f"Auto-Declined: {decline_reason}"
 
     supabase.table("reports").insert({
-        "id": new_id, "concern_type": report.concern_type, "severity": report.severity,
+       "id": new_id, "concern_type": report.concern_type, "severity": report.severity,
         "landmark": report.landmark, "details": report.details, "lat": report.lat, "lng": report.lng,
         "media_url": final_media_url, # Now saves a short, clean URL instead of a 14MB string
         "timestamp": timestamp_str, "status": initial_status,
         "ai_verified": is_valid, "ai_confidence": f"{int(ai_conf)}%", "rejection_reason": decline_reason if not is_valid else None,
-        "citizen_upvotes": 1, "supplementary_evidence": []
-    }).execute()
+        "citizen_upvotes": 1,
+    }).execute() 
     
     return {"success": True, "ref": f"JS-{str(new_id)[-4:]}", "verified": is_valid, "status": initial_status}
 
