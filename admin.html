@@ -62,11 +62,8 @@
                             ATTACHED EVIDENCE <span class="hidden md:inline">(CLICK IMAGES TO ENLARGE)</span>
                         </h3>
                         <div class="p-4 bg-white flex flex-col items-center gap-4 w-full min-h-[150px]">
-                            <!-- Video Player -->
                             <video id="v-video" controls autoplay loop class="w-full object-contain max-h-[300px] hidden border-2 border-black shadow-brutal-sm"></video>
                             <img id="v-image" class="w-full object-contain max-h-[300px] hidden border-2 border-black cursor-pointer shadow-brutal-sm">
-                            
-                            <!-- Snapshot Grid directly below the video -->
                             <div id="v-snapshots-container" class="grid grid-cols-3 gap-2 w-full hidden"></div>
                         </div>
                     </div>
@@ -120,16 +117,13 @@
                 <h1 class="font-black text-lg md:text-2xl uppercase tracking-wider text-brand-yellow">JAN SURAKSHA <span class="hidden md:inline">// COMMAND CENTER</span></h1>
             </div>
             <div class="flex items-center gap-4">
-                
                 <a href="#monitoring-section" class="relative bg-white text-black px-4 py-1.5 font-black uppercase text-sm border-2 border-black hover:bg-brand-yellow transition-colors hidden sm:flex items-center gap-2 shadow-brutal-sm">
                     <span class="material-symbols-outlined text-[18px]">videocam</span> Monitoring Section
                     <span id="nav-alert-badge" class="hidden absolute -top-3 -right-3 bg-brand-red text-white border-2 border-black rounded-full w-6 h-6 flex items-center justify-center text-xs font-black shadow-brutal-sm animate-bounce">0</span>
                 </a>
-
                 <span class="font-mono text-xs text-brand-cyan hidden md:flex items-center gap-2">
                     <span class="w-2 h-2 bg-brand-cyan rounded-full animate-pulse"></span> SESSION ACTIVE
                 </span>
-                
                 <a href="index.html" class="bg-brand-red text-white px-4 py-1.5 font-black uppercase text-sm border-2 border-white hover:bg-white hover:text-black transition-colors shadow-brutal-sm hover:translate-x-1 hover:translate-y-1 hover:shadow-none">Logout</a>
             </div>
         </div>
@@ -137,24 +131,35 @@
 
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-10 mt-4">
         
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 framer-reveal">
+        <!-- Live System Metric Cards (4 Columns) -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 framer-reveal">
             <div class="bg-brand-yellow border-4 border-black p-6 shadow-brutal">
                 <div class="font-mono font-black text-xs uppercase flex items-center gap-2">
                     <span class="material-symbols-outlined text-[18px]">pending_actions</span> Pending Incidents
                 </div>
-                <div id="stat-pending" class="text-5xl md:text-6xl font-black mt-2">0</div>
+                <div id="stat-pending" class="text-4xl md:text-5xl font-black mt-2">0</div>
             </div>
             <div class="bg-brand-cyan border-4 border-black p-6 shadow-brutal">
                 <div class="font-mono font-black text-xs uppercase flex items-center gap-2">
-                    <span class="material-symbols-outlined text-[18px]">verified</span> Total Solved / Resolved
+                    <span class="material-symbols-outlined text-[18px]">verified</span> Cases Solved
                 </div>
-                <div id="stat-solved" class="text-5xl md:text-6xl font-black mt-2">0</div>
+                <div id="stat-solved" class="text-4xl md:text-5xl font-black mt-2">0</div>
             </div>
             <div class="bg-white border-4 border-black p-6 shadow-brutal">
                 <div class="font-mono font-black text-xs uppercase flex items-center gap-2">
-                    <span class="material-symbols-outlined text-[18px]">videocam</span> Active Cameras
+                    <span class="material-symbols-outlined text-[18px]">videocam</span> Active CCTV
                 </div>
-                <div id="stat-cctv" class="text-5xl md:text-6xl font-black mt-2">0</div>
+                <div id="stat-cctv" class="text-4xl md:text-5xl font-black mt-2">0</div>
+            </div>
+            
+            <!-- Live ESP32 Hardware Status Card -->
+            <div id="card-hardware" class="bg-gray-800 text-white border-4 border-black p-6 shadow-brutal transition-colors">
+                <div class="font-mono font-black text-xs uppercase flex items-center justify-between">
+                    <span class="flex items-center gap-2"><span class="material-symbols-outlined text-[18px]">sensors</span> ESP32 NODE</span>
+                    <span id="stat-hardware-dot" class="w-3 h-3 rounded-full bg-gray-500"></span>
+                </div>
+                <div id="stat-hardware" class="text-3xl md:text-4xl font-black mt-2 tracking-tight">STANDBY</div>
+                <p id="stat-hardware-sub" class="font-mono text-[11px] text-gray-300 mt-2 uppercase">Water: -- | Rain: --</p>
             </div>
         </div>
 
@@ -282,7 +287,7 @@
     </main>
 
     <script>
-        const BACKEND_ORIGIN = "https://jan-suraksha.onrender.com";
+        const BACKEND_ORIGIN = "https://browse-header-fountain.ngrok-free.dev"     // "http://127.0.0.1:8000" //"https://jan-suraksha.onrender.com";
         const API_BASE = BACKEND_ORIGIN + "/api";
         let verifyMapInstance = null;
         let verifyMapMarker = null;
@@ -329,7 +334,7 @@
             } catch (err) {}
         }
 
-        // ----------------- LIVE CAMERA FEED (with auto-retry) -----------------
+        // Live Camera Feed
         const VIDEO_FEED_URL = BACKEND_ORIGIN + "/video_feed";
         let feedRetryTimer = null;
 
@@ -339,12 +344,9 @@
             if (!feedImg) return;
 
             clearTimeout(feedRetryTimer);
-
-            // Cache-bust so the browser always opens a fresh MJPEG connection
             feedImg.src = VIDEO_FEED_URL + "?t=" + Date.now();
 
             feedImg.onload = () => {
-                // Fires once the multipart stream starts delivering frames
                 feedImg.classList.remove('hidden');
                 if (placeholder) placeholder.classList.add('hidden');
                 const statusEl = document.getElementById('cctv-status');
@@ -352,7 +354,6 @@
             };
 
             feedImg.onerror = () => {
-                console.warn("[LIVE FEED] Stream unavailable, retrying in 3s...");
                 feedImg.classList.add('hidden');
                 if (placeholder) {
                     placeholder.textContent = "Camera feed offline — retrying...";
@@ -412,6 +413,7 @@
             }
         }
 
+        // Fetch metrics and hardware telemetry
         async function fetchStats() {
             try {
                 const res = await fetch(API_BASE + "/stats"); 
@@ -420,6 +422,40 @@
                 document.getElementById('stat-pending').innerText = data.pending_reviews;
                 document.getElementById('stat-solved').innerText = data.cases_solved;
                 document.getElementById('stat-cctv').innerText = data.active_cctv_nodes;
+
+                // Sync live ESP32 status
+                if (data.hardware_telemetry) {
+                    const hw = data.hardware_telemetry;
+                    const card = document.getElementById('card-hardware');
+                    const text = document.getElementById('stat-hardware');
+                    const subText = document.getElementById('stat-hardware-sub');
+                    const dot = document.getElementById('stat-hardware-dot');
+
+                    // Check freshness: if last update is older than 10 seconds, flag as OFFLINE
+                    const isStale = (Date.now() / 1000 - (hw.last_update || 0)) > 10;
+                    
+                    if (isStale) {
+                        card.className = "bg-gray-800 text-white border-4 border-black p-6 shadow-brutal transition-colors";
+                        text.innerText = "OFFLINE";
+                        dot.className = "w-3 h-3 rounded-full bg-gray-500";
+                        subText.innerText = "NO TELEMETRY DETECTED";
+                    } else {
+                        text.innerText = hw.overall_state;
+                        subText.innerText = `WATER: ${hw.water_raw} | RAIN: ${hw.rain_raw}`;
+
+                        if (hw.overall_state === 'CRITICAL') {
+                            card.className = "bg-brand-red text-white border-4 border-black p-6 shadow-brutal transition-colors";
+                            dot.className = "w-3 h-3 rounded-full bg-white animate-ping";
+                        } else if (hw.overall_state === 'WARNING') {
+                            card.className = "bg-brand-yellow text-black border-4 border-black p-6 shadow-brutal transition-colors";
+                            dot.className = "w-3 h-3 rounded-full bg-black";
+                            subText.className = "font-mono text-[11px] text-gray-800 mt-2 uppercase font-bold";
+                        } else {
+                            card.className = "bg-green-600 text-white border-4 border-black p-6 shadow-brutal transition-colors";
+                            dot.className = "w-3 h-3 rounded-full bg-green-300 animate-pulse";
+                        }
+                    }
+                }
 
                 const navBadge = document.getElementById('nav-alert-badge');
                 if (data.pending_reviews > 0) {
@@ -439,7 +475,9 @@
                     }, 3500);
                 }
                 previousPendingCount = data.pending_reviews;
-            } catch (err) {}
+            } catch (err) {
+                console.error("Telemetry poll failed", err);
+            }
         }
 
         async function loadIncidents() {
@@ -448,14 +486,12 @@
         async function loadReports() {
             try { const res = await fetch(API_BASE + "/reports"); window.allReports = await res.json(); } catch (err) {}
         }
+
         let lastRenderedSignature = "";
         async function loadAndRenderData() {
-            // Fetching both lists in parallel and rendering exactly ONCE (instead
-            // of once per fetch) was the main cause of the dashboard lag - it was
-            // doing a full table rebuild twice on every single poll.
             await Promise.all([loadIncidents(), loadReports()]);
             const signature = JSON.stringify(window.allIncidents) + "|" + JSON.stringify(window.allReports) + "|" + activeFilter;
-            if (signature === lastRenderedSignature) return; // nothing actually changed - skip the DOM rebuild
+            if (signature === lastRenderedSignature) return;
             lastRenderedSignature = signature;
             renderAllData();
         }
@@ -700,6 +736,7 @@
             closeVerifyModal();
         }
 
+        // Live Polling every 4 seconds
         setInterval(() => { 
             fetchStats(); 
             loadAndRenderData();

@@ -108,7 +108,7 @@ def _count(table, statuses, exclude=False):
     return q.execute().count or 0
 
 # Public URL of this backend, used to build evidence links. Render sets RENDER_EXTERNAL_URL automatically.
-PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "https://jan-suraksha.onrender.com").rstrip("/")
+PUBLIC_BASE_URL = "https://browse-header-fountain.ngrok-free.dev" #(os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "https://jan-suraksha.onrender.com").rstrip("/")
 
 EVIDENCE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "evidence")
 os.makedirs(EVIDENCE_DIR, exist_ok=True)
@@ -154,7 +154,10 @@ hardware_state = {
     "rain_raw": 0,
     "overall_state": "NORMAL",
     "last_update": 0
+    
 }
+last_hardware_incident_time = 0.0
+HARDWARE_INCIDENT_COOLDOWN_SEC = 60.0
 
 CCTV_NODES = [
     {"id": "CAM-SMART-ROAD-01", "lat": 26.4499, "lng": 80.3319, "name": "Model Underpass & Footpath (Sector 3)"},
@@ -285,14 +288,44 @@ threading.Thread(target=dispatch_timeout_monitor, daemon=True).start()
 
 # ----------------- ENDPOINTS -----------------
 def _store_esp32_state(data: ESP32Telemetry):
-    """Store the latest ESP32 environmental telemetry in the in-memory cache."""
-    global hardware_state
+    """Store the latest ESP32 environmental telemetry in the in-memory cache and trigger camera."""
+    global hardware_state, last_hardware_incident_time
     hardware_state.update({
         "water_raw": data.water_raw,
         "rain_raw": data.rain_raw,
         "overall_state": data.overall_state,
         "last_update": time.time()
     })
+
+    # --- NEW: Hardware-Triggered Camera Snapshot ---
+    if data.overall_state in ["WARNING", "CRITICAL"]:
+        current_time = time.time()
+        
+        # Only trigger a photo if 60 seconds have passed since the last hardware alert
+        if current_time - last_hardware_incident_time > HARDWARE_INCIDENT_COOLDOWN_SEC:
+            last_hardware_incident_time = current_time
+
+            snapshot_b64 = None
+            # 1. Grab the latest frame directly from the live camera memory
+            with camera_state_lock:
+                if latest_encoded_frame is not None:
+                    import base64
+                    b64_str = base64.b64encode(latest_encoded_frame).decode('utf-8')
+                    snapshot_b64 = f"data:image/jpeg;base64,{b64_str}"
+
+            # 2. If we got a photo, commit it to the database as a new incident
+            if snapshot_b64:
+                event_label = "Sensor Hazard: CRITICAL" if data.overall_state == "CRITICAL" else "Sensor Hazard: WARNING"
+                conf_score = "99%" if data.overall_state == "CRITICAL" else "85%"
+                
+                # Run the commit process in the background so the ESP32 doesn't time out
+                threading.Thread(
+                    target=commit_incident_in_memory, 
+                    args=(event_label, conf_score, [], [snapshot_b64]), 
+                    daemon=True
+                ).start()
+                
+                print(f"[HARDWARE TRIGGER] {data.overall_state} detected! Snapshot captured and incident published.")
 
 
 @app.post("/api/hardware/telemetry")
@@ -382,9 +415,67 @@ def update_incident_status(incident_id: int, update_data: StatusUpdate):
     supabase.table("incidents").update(update_doc).eq("id", incident_id).execute()
     return {"message": "Updated"}
 
-@app.get("/api/reports")
-def get_reports(limit: int = 200):
-    return supabase.table("reports").select("*").order("timestamp", desc=True).limit(max(1, min(limit, 500))).execute().data or []
+@app.post("/api/reports")
+def submit_report(report: CitizenReport):
+    if report.lat is not None and not (-90.0 <= report.lat <= 90.0):
+        raise HTTPException(status_code=422, detail="Invalid latitude.")
+    if report.lng is not None and not (-180.0 <= report.lng <= 180.0):
+        raise HTTPException(status_code=422, detail="Invalid longitude.")
+
+    new_id = generate_id()
+    timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if report.lat and report.lng:
+        dup = find_nearby_duplicate(report.lat, report.lng, report.concern_type, max_meters=50.0)
+        if dup:
+            patch = {"citizen_upvotes": (dup.get("citizen_upvotes") or 1) + 1}
+            if report.media_url:
+                patch["supplementary_evidence"] = (dup.get("supplementary_evidence") or []) + [report.media_url]
+            supabase.table("reports").update(patch).eq("id", dup["id"]).execute()
+            return {"success": True, "ref": f"JS-{str(dup['id'])[-4:]}", "merged": True, "message": "Incident merged."}
+
+    is_valid, decline_reason, ai_conf = True, None, 85.0
+    final_media_url = ""
+
+    if report.media_url and report.media_url.startswith("data:image"):
+        frame = decode_base64_image(report.media_url)
+        if frame is not None:
+            q_ok, q_msg = check_image_quality(frame)
+            if not q_ok: is_valid, decline_reason = False, f"Image Discarded: {q_msg}"
+            else:
+                s_ok, s_msg, s_conf = verify_semantic_relevance(frame, report.concern_type)
+                ai_conf = s_conf
+                if not s_ok: is_valid, decline_reason = False, f"Relevance Mismatch: {s_msg}"
+                else:
+                    # PROPER STORAGE ROUTING: Save to Supabase Storage bucket instead of DB row
+                    filename = f"report_{new_id}.jpg"
+                    local_path = os.path.join(EVIDENCE_DIR, filename)
+                    cv2.imwrite(local_path, frame)
+                    cloud_url = upload_evidence_to_supabase(local_path, filename)
+                    
+                    if cloud_url:
+                        final_media_url = cloud_url
+                        try:
+                            os.remove(local_path)
+                        except OSError:
+                            pass
+                    else:
+                        final_media_url = f"{PUBLIC_BASE_URL}/evidence/{filename}"
+        else:
+            is_valid, decline_reason = False, "Corrupted image payload."
+
+    initial_status = "Pending Review" if is_valid else f"Auto-Declined: {decline_reason}"
+
+    supabase.table("reports").insert({
+        "id": new_id, "concern_type": report.concern_type, "severity": report.severity,
+        "landmark": report.landmark, "details": report.details, "lat": report.lat, "lng": report.lng,
+        "media_url": final_media_url, # Now saves a short, clean URL instead of a 14MB string
+        "timestamp": timestamp_str, "status": initial_status,
+        "ai_verified": is_valid, "ai_confidence": f"{int(ai_conf)}%", "rejection_reason": decline_reason if not is_valid else None,
+        "citizen_upvotes": 1, "supplementary_evidence": []
+    }).execute()
+    
+    return {"success": True, "ref": f"JS-{str(new_id)[-4:]}", "verified": is_valid, "status": initial_status}
 
 @app.get("/api/reports/track/{ref_id}")
 def track_report(ref_id: str):
@@ -597,6 +688,34 @@ def commit_incident_in_memory(event_type, conf_score, captured_frames, snapshots
 _pose_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'yolov8n-pose.pt')
 ai_pose_model = YOLO(_pose_path if os.path.isfile(_pose_path) else 'yolov8n-pose.pt')
 print("[SYSTEM] Running on CPU Mode.")
+
+# --- MULTI-OBJECT TRACKER (fall + altercation detection ONLY) ---
+# TRACKER_TYPE=botsort (default) or bytetrack. Both ship with Ultralytics.
+# A SEPARATE model instance is used for tracking on purpose: .track() keeps tracker
+# state inside the model, so sharing ai_pose_model would let report-verification and
+# ESP32 jobs (which call ai_pose_model on one-off images) corrupt the live track IDs.
+# ai_pose_model above is left exactly as it was for those callers.
+TRACKER_TYPE = os.environ.get("TRACKER_TYPE", "botsort").strip().lower()
+if TRACKER_TYPE not in ("botsort", "bytetrack"):
+    print(f"[TRACKER] Unknown TRACKER_TYPE '{TRACKER_TYPE}', using botsort.")
+    TRACKER_TYPE = "botsort"
+TRACKER_CONFIG = f"{TRACKER_TYPE}.yaml"
+# Low detection floor on purpose: the tracker splits detections into high (>=0.25) and low
+# (0.10-0.25) confidence. Low ones can only EXTEND an existing track (never start a new one),
+# which keeps IDs alive through blur / occlusion / a person going horizontal mid-fall.
+TRACK_DET_CONF = 0.10
+ai_track_model = YOLO(_pose_path if os.path.isfile(_pose_path) else 'yolov8n-pose.pt')
+print(f"[SYSTEM] Fall/altercation tracker: {TRACKER_TYPE}")
+
+def reset_tracker_state():
+    """Drop all tracker memory (called after the scene has been idle, so a stale lost
+    track can never be re-matched to someone who walks in much later)."""
+    try:
+        predictor = getattr(ai_track_model, "predictor", None)
+        for t in (getattr(predictor, "trackers", None) or []):
+            t.reset()
+    except Exception as e:
+        print(f"[TRACKER] reset skipped: {e}")
 
 person_kinematic_cache = {}
 PRE_ROLL_SECONDS = 5
@@ -1147,6 +1266,7 @@ def camera_processing_loop():
     tracked_incident_id = None
     abort_msg_until = 0
     consecutive_read_failures = 0
+    tracker_was_reset = False
 
     while True:
         success, raw_frame = camera.read()
@@ -1210,19 +1330,27 @@ def camera_processing_loop():
             scene_is_idle = motion_score < MOTION_SKIP_THRESHOLD
         prev_gray_for_motion = gray_now
 
+        if scene_is_idle:
+            if not tracker_was_reset:
+                reset_tracker_state()
+                tracker_was_reset = True
+        else:
+            tracker_was_reset = False
+
         if frame_count % 3 == 0 and not scene_is_idle:
             try:
                 cached_humans.clear(); cached_kpts.clear(); cached_kconfs.clear()
                 cached_fall = None; cached_water = None; cached_altercation = None
 
-                results = ai_pose_model(frame, conf=0.25, imgsz=320, device='cpu', verbose=False) 
+                results = ai_track_model.track(frame, persist=True, tracker=TRACKER_CONFIG, conf=TRACK_DET_CONF, imgsz=320, device='cpu', verbose=False)
                 detected_pids = set()
                 active_people = []
                 pid_to_pose = {}
 
                 for r in results:
-                    if r.boxes is None: continue
+                    if r.boxes is None or r.boxes.id is None: continue   # no confirmed tracks this cycle
                     boxes = r.boxes.xyxy.cpu().numpy()
+                    track_ids = r.boxes.id.int().cpu().tolist()
                     # Keypoints may be sparse/low-confidence exactly when someone has fallen
                     # (occluded limbs, horizontal body, odd viewing angle). Never let missing
                     # keypoints throw away the detection itself - the fall math below only
@@ -1250,30 +1378,15 @@ def camera_processing_loop():
                         cx = (x1 + x2) / 2.0
                         cy = (y1 + y2) / 2.0
 
-                        best_id = None
-                        best_score = -1.0
-                        for pid, data in person_kinematic_cache.items():
-                            if len(data["history"]) == 0: continue
-                            last_cx, last_cy, last_w, last_h = data["history"][-1][1], data["history"][-1][2], data["history"][-1][3], data["history"][-1][4]
-                            iou = _iou_from_center(cx, cy, box_width, box_height, last_cx, last_cy, last_w, last_h)
-                            dist = math.hypot(cx - last_cx, cy - last_cy)
-                            # IoU survives close/overlapping people (exactly the case in a fight
-                            # or a crowd) far better than raw centroid distance, which is prone
-                            # to swapping IDs between two nearby people. Fall back to distance
-                            # only when the boxes don't overlap at all (e.g. fast motion).
-                            score = iou if iou > 0 else -dist / 300.0
-                            if score > best_score and (iou > 0.1 or dist < 200.0):
-                                best_score = score
-                                best_id = pid
-                            
-                        if best_id is None:
-                            best_id = f"p_{int(now*1000) % 100000}"
-                            person_kinematic_cache[best_id] = {
-                                "history": deque(maxlen=20), 
+                        # Identity now comes from BoT-SORT / ByteTrack (Kalman prediction +
+                        # one-to-one Hungarian matching + low-confidence recovery) instead of
+                        # the old greedy per-box IoU matcher.
+                        track_id = f"t{track_ids[i]}"
+                        if track_id not in person_kinematic_cache:
+                            person_kinematic_cache[track_id] = {
+                                "history": deque(maxlen=20),
                                 "stationary_time": 0.0
                             }
-                    
-                        track_id = best_id
                         detected_pids.add(track_id)
                         active_people.append((track_id, cx, cy, box_width, box_height))
                         pid_to_pose[track_id] = (this_kpts, this_kconf)
