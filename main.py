@@ -401,12 +401,17 @@ def unified_login(login_data: OfficialLogin):
     raise HTTPException(status_code=401, detail="INVALID CREDENTIALS")
 
 @app.get("/api/incidents")
-def get_incidents(limit: int = 200):
+async  def get_incidents(limit: int = 200):
     # Unbounded queries here were the main cause of the admin dashboard
     # getting slower over time: every incident ever recorded was being sent
     # and re-sorted on every 4-second poll. The dashboard only ever shows the
     # most recent ones anyway, so cap it server-side.
     return supabase.table("incidents").select("*").order("timestamp", desc=True).limit(max(1, min(limit, 500))).execute().data or []
+
+@app.get("/api/reports")
+async def get_reports(limit: int = 200):
+    """Fetches the latest citizen reports for the admin dashboard."""
+    return supabase.table("reports").select("*").order("timestamp", desc=True).limit(max(1, min(limit, 500))).execute().data or []
 
 @app.patch("/api/incidents/{incident_id}/status")
 def update_incident_status(incident_id: int, update_data: StatusUpdate):
@@ -416,7 +421,7 @@ def update_incident_status(incident_id: int, update_data: StatusUpdate):
     return {"message": "Updated"}
 
 @app.post("/api/reports")
-def submit_report(report: CitizenReport):
+async def submit_report(report: CitizenReport):
     if report.lat is not None and not (-90.0 <= report.lat <= 90.0):
         raise HTTPException(status_code=422, detail="Invalid latitude.")
     if report.lng is not None and not (-180.0 <= report.lng <= 180.0):
@@ -489,50 +494,6 @@ def track_report(ref_id: str):
             }
     raise HTTPException(status_code=404, detail="Report not found")
 
-@app.post("/api/reports")
-def submit_report(report: CitizenReport):
-    if report.lat is not None and not (-90.0 <= report.lat <= 90.0):
-        raise HTTPException(status_code=422, detail="Invalid latitude.")
-    if report.lng is not None and not (-180.0 <= report.lng <= 180.0):
-        raise HTTPException(status_code=422, detail="Invalid longitude.")
-
-    new_id = generate_id()
-    timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    if report.lat and report.lng:
-        dup = find_nearby_duplicate(report.lat, report.lng, report.concern_type, max_meters=50.0)
-        if dup:
-            patch = {"citizen_upvotes": (dup.get("citizen_upvotes") or 1) + 1}
-            if report.media_url:
-                patch["supplementary_evidence"] = (dup.get("supplementary_evidence") or []) + [report.media_url]
-            supabase.table("reports").update(patch).eq("id", dup["id"]).execute()
-            return {"success": True, "ref": f"JS-{str(dup['id'])[-4:]}", "merged": True, "message": "Incident merged."}
-
-    is_valid, decline_reason, ai_conf = True, None, 85.0
-
-    if report.media_url and report.media_url.startswith("data:image"):
-        frame = decode_base64_image(report.media_url)
-        if frame is not None:
-            q_ok, q_msg = check_image_quality(frame)
-            if not q_ok: is_valid, decline_reason = False, f"Image Discarded: {q_msg}"
-            else:
-                s_ok, s_msg, s_conf = verify_semantic_relevance(frame, report.concern_type)
-                ai_conf = s_conf
-                if not s_ok: is_valid, decline_reason = False, f"Relevance Mismatch: {s_msg}"
-        else:
-            is_valid, decline_reason = False, "Corrupted image payload."
-
-    initial_status = "Pending Review" if is_valid else f"Auto-Declined: {decline_reason}"
-
-    supabase.table("reports").insert({
-        "id": new_id, "concern_type": report.concern_type, "severity": report.severity,
-        "landmark": report.landmark, "details": report.details, "lat": report.lat, "lng": report.lng,
-        "media_url": report.media_url, "timestamp": timestamp_str, "status": initial_status,
-        "ai_verified": is_valid, "ai_confidence": f"{int(ai_conf)}%", "rejection_reason": decline_reason if not is_valid else None,
-        "citizen_upvotes": 1, "supplementary_evidence": []
-    }).execute()
-    return {"success": True, "ref": f"JS-{str(new_id)[-4:]}", "verified": is_valid, "status": initial_status}
-
 @app.patch("/api/reports/{report_id}/status")
 def update_report_status(report_id: int, update_data: StatusUpdate):
     update_doc = {"status": update_data.status}
@@ -553,7 +514,7 @@ def dispatch_official(doc_id: int, data: DispatchUpdate):
     return {"message": "Dispatched", "status": status_txt}
 
 @app.get("/api/stats")
-def get_stats():
+async def get_stats():
     open_states = ["Pending", "Pending Review"]
     pending = _count("incidents", open_states) + _count("reports", open_states)
     solved = _count("incidents", open_states, exclude=True) + _count("reports", open_states, exclude=True)

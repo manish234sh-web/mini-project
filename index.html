@@ -599,7 +599,10 @@
             try {
                 const res = await fetch(API_BASE + "/auth/login", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: { 
+                        "Content-Type": "application/json",
+                        "ngrok-skip-browser-warning": "69420"
+                     },
                     body: JSON.stringify({ operator_id: operatorId, auth_key: authKey })
                 });
 
