@@ -402,6 +402,33 @@
     <script>
         const BACKEND_ORIGIN = "https://browse-header-fountain.ngrok-free.dev" //"http://127.0.0.1:8000" //"https://jan-suraksha.onrender.com";
         const API_BASE = BACKEND_ORIGIN + "/api";
+        function readFileAsDataURL(file) {
+            return new Promise((resolve, reject) => {
+                const r = new FileReader();
+                r.onload = () => resolve(r.result);
+                r.onerror = () => reject(r.error);
+                r.readAsDataURL(file);
+            });
+        }
+
+        function compressImage(file, maxDim = 1280, quality = 0.8) {
+            return new Promise((resolve, reject) => {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => {
+                    const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+                    const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+                    const canvas = document.createElement('canvas');
+                    canvas.width = w; canvas.height = h;
+                    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                    URL.revokeObjectURL(url);
+                    resolve(canvas.toDataURL('image/jpeg', quality));
+                };
+                img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("decode failed")); };
+                img.src = url;
+            });
+        }
+
         let map, marker, accuracyCircle;
         const defaultLat = 26.4499, defaultLng = 80.3319;
 
@@ -519,41 +546,54 @@
             btnText.innerText = 'TRANSMITTING EVIDENCE...';
             btnSpinner.classList.remove('hidden');
 
-            const reader = new FileReader();
-            reader.onload = async function(event) {
-                const payload = {
-                    concern_type: concernNode.value,
-                    severity: severityNode.value,
-                    landmark: document.getElementById('landmark-input').value,
-                    details: document.getElementById('details-input').value,
-                    lat: document.getElementById('report-lat').value ? parseFloat(document.getElementById('report-lat').value) : null,
-                    lng: document.getElementById('report-lng').value ? parseFloat(document.getElementById('report-lng').value) : null,
-                    media_url: event.target.result
-                };
-
+            (async () => {
                 try {
+                    // Shrink phone photos (often 5-15 MB) before upload: keeps the request small
+                    // enough for a tunnel and makes the AI check faster.
+                    let mediaData;
+                    try { mediaData = await compressImage(mediaFile.files[0]); }
+                    catch (e) { mediaData = await readFileAsDataURL(mediaFile.files[0]); }
+
+                    const payload = {
+                        concern_type: concernNode.value,
+                        severity: severityNode.value,
+                        landmark: document.getElementById('landmark-input').value,
+                        details: document.getElementById('details-input').value,
+                        lat: document.getElementById('report-lat').value ? parseFloat(document.getElementById('report-lat').value) : null,
+                        lng: document.getElementById('report-lng').value ? parseFloat(document.getElementById('report-lng').value) : null,
+                        media_url: mediaData
+                    };
+
                     const res = await fetch(API_BASE + "/reports", {
                         method: "POST",
-                        headers: { "Content-Type": "application/json" },
+                        headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "69420" },
                         body: JSON.stringify(payload)
                     });
-                    const data = await res.json();
-                    if (data.success) {
-                        document.getElementById('success-ref-id').innerText = `JS-${data.ref}`;
+                    let data = null;
+                    try { data = await res.json(); } catch (e) {}
+                    if (res.ok && data && data.success) {
+                        const ref = String(data.ref || "").replace(/^JS-/, "");
+                        document.getElementById('success-ref-id').innerText = `JS-${ref}`;
                         document.getElementById('success-modal').classList.remove('hidden');
                         document.getElementById('report-form').reset();
                         document.getElementById('file-label-text').innerText = 'Tap To Select Photo';
+                        if (data.verified === false) {
+                            alert("Your report was logged but the photo did not pass automatic verification:\n" + (data.status || "") + "\n\nA reviewer may still look at it. Retake the photo (clear, well lit, showing the incident) if it is urgent.");
+                        }
+                    } else {
+                        const why = (data && (data.detail || data.message)) || ("Server returned HTTP " + res.status);
+                        alert("Submission failed: " + (typeof why === "string" ? why : JSON.stringify(why)));
                     }
                 } catch (err) {
-                    alert("Submission failed. Could not reach the server. It may be waking up - please wait a few seconds and try again.");
+                    console.error("Report submit error:", err);
+                    alert("Submission failed. Could not reach the server. Make sure the backend and ngrok are running, then try again.");
                 } finally {
                     submitBtn.disabled = false;
                     submitBtn.classList.replace('bg-black', 'bg-brand-red');
                     btnText.innerText = 'Submit Urgent Report';
                     btnSpinner.classList.add('hidden');
                 }
-            };
-            reader.readAsDataURL(mediaFile.files[0]);
+            })();
         });
 
         // --- TRACK FORM ---
@@ -567,7 +607,7 @@
             errorBox.classList.add('hidden');
 
             try {
-                const res = await fetch(API_BASE + "/reports/track/" + refId);
+                const res = await fetch(API_BASE + "/reports/track/" + refId, { headers: { "ngrok-skip-browser-warning": "69420" } });
                 if (res.ok) {
                     const data = await res.json();
                     let statusColor = "text-brand-yellow bg-black px-2 py-0.5";
@@ -625,7 +665,7 @@
 
         async function fetchPublicStats() {
             try {
-                const res = await fetch(API_BASE + "/stats");
+                const res = await fetch(API_BASE + "/stats", { headers: { "ngrok-skip-browser-warning": "69420" } });
                 if (res.ok) {
                     const data = await res.json();
                     document.getElementById('pub-stat-solved').innerText = data.cases_solved;

@@ -335,34 +335,59 @@
         }
 
         // Live Camera Feed
-        const VIDEO_FEED_URL = BACKEND_ORIGIN + "/video_feed";
-        let feedRetryTimer = null;
+        // Polls /api/camera/snapshot with fetch() so the ngrok-skip-browser-warning header
+        // can be sent (an <img src=...> cannot send headers, and ngrok's interstitial page
+        // or its handling of endless MJPEG streams is what broke the old <img> approach).
+        const SNAPSHOT_URL = BACKEND_ORIGIN + "/api/camera/snapshot";
+        let feedGeneration = 0;
+        let feedBlobUrl = null;
 
-        function connectLiveFeed() {
+        function setFeedStatus(online) {
             const feedImg = document.getElementById('live-feed');
             const placeholder = document.getElementById('live-feed-placeholder');
-            if (!feedImg) return;
-
-            clearTimeout(feedRetryTimer);
-            feedImg.src = VIDEO_FEED_URL + "?t=" + Date.now();
-
-            feedImg.onload = () => {
+            const statusEl = document.getElementById('cctv-status');
+            if (online) {
                 feedImg.classList.remove('hidden');
                 if (placeholder) placeholder.classList.add('hidden');
-                const statusEl = document.getElementById('cctv-status');
                 if (statusEl) { statusEl.textContent = "ONLINE / AI ACTIVE"; statusEl.className = "text-green-500 font-bold"; }
-            };
-
-            feedImg.onerror = () => {
+            } else {
                 feedImg.classList.add('hidden');
                 if (placeholder) {
-                    placeholder.textContent = "Camera feed offline — retrying...";
+                    placeholder.textContent = "Camera feed offline \u2014 retrying...";
                     placeholder.classList.remove('hidden');
                 }
-                const statusEl = document.getElementById('cctv-status');
                 if (statusEl) { statusEl.textContent = "OFFLINE / RETRYING"; statusEl.className = "text-brand-red font-bold"; }
-                feedRetryTimer = setTimeout(connectLiveFeed, 3000);
-            };
+            }
+        }
+
+        async function pollFeed(gen) {
+            if (gen !== feedGeneration) return;          // a newer loop took over
+            let delay = 200;                              // ~5 fps
+            try {
+                const res = await fetch(SNAPSHOT_URL + "?t=" + Date.now(), {
+                    headers: { "ngrok-skip-browser-warning": "69420" },
+                    cache: "no-store"
+                });
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                const blob = await res.blob();
+                if (!blob.type.startsWith("image/")) throw new Error("Not an image (ngrok page?)");
+                const url = URL.createObjectURL(blob);
+                const feedImg = document.getElementById('live-feed');
+                feedImg.src = url;
+                if (feedBlobUrl) URL.revokeObjectURL(feedBlobUrl);
+                feedBlobUrl = url;
+                setFeedStatus(true);
+            } catch (err) {
+                setFeedStatus(false);
+                delay = 3000;
+            }
+            if (document.hidden) delay = Math.max(delay, 2000);   // be gentle on background tabs
+            setTimeout(() => pollFeed(gen), delay);
+        }
+
+        function connectLiveFeed() {
+            feedGeneration++;                             // cancels any previous loop
+            pollFeed(feedGeneration);
         }
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -434,7 +459,8 @@
                     const dot = document.getElementById('stat-hardware-dot');
 
                     // Check freshness: if last update is older than 10 seconds, flag as OFFLINE
-                    const isStale = (Date.now() / 1000 - (hw.last_update || 0)) > 10;
+                    const ageSec = (hw.age_seconds !== undefined && hw.age_seconds !== null) ? hw.age_seconds : (hw.last_update ? (Date.now() / 1000 - hw.last_update) : Infinity);
+                    const isStale = ageSec > 10;
                     
                     if (isStale) {
                         card.className = "bg-gray-800 text-white border-4 border-black p-6 shadow-brutal transition-colors";

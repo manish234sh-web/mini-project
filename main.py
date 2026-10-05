@@ -4,7 +4,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 try:
@@ -108,7 +108,7 @@ def _count(table, statuses, exclude=False):
     return q.execute().count or 0
 
 # Public URL of this backend, used to build evidence links. Render sets RENDER_EXTERNAL_URL automatically.
-PUBLIC_BASE_URL = "https://browse-header-fountain.ngrok-free.dev" #(os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "https://jan-suraksha.onrender.com").rstrip("/")
+PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or "https://browse-header-fountain.ngrok-free.dev").rstrip("/")
 
 EVIDENCE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "evidence")
 os.makedirs(EVIDENCE_DIR, exist_ok=True)
@@ -341,9 +341,17 @@ def update_state(data: ESP32Telemetry):
     return {"success": True, "message": "ESP32 state received"}
 
 
+def _hardware_snapshot():
+    """Telemetry plus a server-computed age, so the dashboard never depends on
+    the viewer's clock matching the server's clock."""
+    snap = dict(hardware_state)
+    last = snap.get("last_update") or 0
+    snap["age_seconds"] = (time.time() - last) if last else None
+    return snap
+
 @app.get("/api/hardware/status")
 def get_hardware_status():
-    return hardware_state
+    return _hardware_snapshot()
 
 @app.get("/api/cameras")
 def get_cameras():
@@ -421,7 +429,21 @@ def update_incident_status(incident_id: int, update_data: StatusUpdate):
     return {"message": "Updated"}
 
 @app.post("/api/reports")
-async def submit_report(report: CitizenReport):
+def submit_report(report: CitizenReport):
+    # NOTE: plain `def` (not `async def`) on purpose. This handler does blocking work
+    # (OpenCV, YOLO, Supabase calls). Inside `async def` it froze the whole event loop,
+    # so every other request (stats, video, ESP32) stalled while a photo was processed.
+    try:
+        return _submit_report_impl(report)
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Return a proper JSON error: an unhandled 500 carries no CORS headers, which the
+        # browser reports as a vague network failure instead of the real reason.
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Server could not save the report: {e}")
+
+def _submit_report_impl(report: CitizenReport):
     if report.lat is not None and not (-90.0 <= report.lat <= 90.0):
         raise HTTPException(status_code=422, detail="Invalid latitude.")
     if report.lng is not None and not (-180.0 <= report.lng <= 180.0):
@@ -518,7 +540,7 @@ async def get_stats():
     open_states = ["Pending", "Pending Review"]
     pending = _count("incidents", open_states) + _count("reports", open_states)
     solved = _count("incidents", open_states, exclude=True) + _count("reports", open_states, exclude=True)
-    return {"pending_reviews": pending, "cases_solved": solved, "active_cctv_nodes": len(CCTV_NODES), "hardware_telemetry": hardware_state}
+    return {"pending_reviews": pending, "cases_solved": solved, "active_cctv_nodes": len(CCTV_NODES), "hardware_telemetry": _hardware_snapshot()}
 
 @app.get("/")
 def root():
@@ -1616,25 +1638,58 @@ def camera_processing_loop():
             with camera_state_lock:
                 latest_encoded_frame = encoded_img.tobytes()
 
+def camera_supervisor():
+    """Keeps the camera thread alive. Previously any unexpected exception inside
+    camera_processing_loop killed the thread silently while camera_worker_started stayed
+    True, so the dashboard feed froze/offline until the whole server was restarted."""
+    import gc
+    while True:
+        try:
+            camera_processing_loop()
+        except Exception:
+            print("[CAMERA] Processing loop crashed - restarting in 2s:")
+            traceback.print_exc()
+            gc.collect()   # drops the dead loop's VideoCapture so the device is freed
+            time.sleep(2.0)
+
 def start_camera_worker_if_needed():
     global camera_worker_started
     with camera_worker_lock:
         if not camera_worker_started:
             camera_worker_started = True
-            threading.Thread(target=camera_processing_loop, daemon=True).start()
+            threading.Thread(target=camera_supervisor, daemon=True).start()
+
+@app.on_event("startup")
+def _start_camera_on_boot():
+    # Start the camera as soon as the server boots. Before, it only started when someone
+    # opened /video_feed, so ESP32 hardware alerts had no frame to snapshot until then.
+    start_camera_worker_if_needed()
 
 def mjpeg_stream_generator():
-    """Thin per-client consumer - never touches the camera. Just polls the
-    shared latest frame and streams it, so any number of tabs/refreshes can
-    connect at once without contending for the hardware."""
-    last_sent = None
+    """Thin per-client consumer - never touches the camera. Re-sends the latest frame at
+    least once a second, so proxies like ngrok never see an idle connection."""
+    last_sent, last_sent_at = None, 0.0
     while True:
         with camera_state_lock:
             frame_bytes = latest_encoded_frame
-        if frame_bytes is not None and frame_bytes is not last_sent:
-            last_sent = frame_bytes
-            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        now = time.time()
+        if frame_bytes is not None and (frame_bytes is not last_sent or now - last_sent_at > 1.0):
+            last_sent, last_sent_at = frame_bytes, now
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + str(len(frame_bytes)).encode() + b'\r\n\r\n' + frame_bytes + b'\r\n')
         time.sleep(0.05)
+
+@app.get("/api/camera/snapshot")
+def camera_snapshot():
+    """Single latest JPEG. The dashboard polls this with fetch() instead of using a long-lived
+    MJPEG <img>: an <img> tag cannot send the ngrok-skip-browser-warning header, and ngrok's
+    free tier handles endless multipart streams poorly. Plain requests are reliable."""
+    start_camera_worker_if_needed()
+    with camera_state_lock:
+        frame_bytes = latest_encoded_frame
+    if frame_bytes is None:
+        raise HTTPException(status_code=503, detail="Camera warming up")
+    return Response(content=frame_bytes, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Access-Control-Allow-Origin": "*"})
 
 @app.get("/video_feed")
 def video_feed():

@@ -90,6 +90,7 @@
     <script>
         const BACKEND_ORIGIN = "https://browse-header-fountain.ngrok-free.dev"//"https://jan-suraksha.onrender.com";
         const API_BASE = BACKEND_ORIGIN + "/api";
+        const NGROK_H = { "ngrok-skip-browser-warning": "69420" };   // skips ngrok's interstitial page, which otherwise breaks CORS
         const sirenAudio = new Audio("https://actions.google.com/sounds/v1/alarms/warning_siren.ogg");
         sirenAudio.loop = true; sirenAudio.volume = 1.0; 
 
@@ -131,7 +132,7 @@
 
         async function syncDatabaseMissions() {
             try {
-                const [incRes, repRes] = await Promise.all([fetch(`${API_BASE}/incidents`), fetch(`${API_BASE}/reports`)]);
+                const [incRes, repRes] = await Promise.all([fetch(`${API_BASE}/incidents`, { headers: NGROK_H }), fetch(`${API_BASE}/reports`, { headers: NGROK_H })]);
                 const allData = [...await incRes.json(), ...await repRes.json()].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
 
                 let found = false;
@@ -292,7 +293,7 @@
             reader.onload = async function(event) {
                 try {
                     await fetch(`${API_BASE}/${activeResolveCollection}/${activeResolveId}/status`, {
-                        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                        method: 'PATCH', headers: { 'Content-Type': 'application/json', ...NGROK_H },
                         body: JSON.stringify({ status: "Resolved On-Site", resolution_media: event.target.result })
                     });
                     
